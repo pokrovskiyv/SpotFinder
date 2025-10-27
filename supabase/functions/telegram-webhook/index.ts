@@ -1,20 +1,18 @@
 // Main Telegram Webhook Handler - Entry point for all Telegram updates
+/* @supabase/functions-ignore */
 
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+console.info('telegram-webhook started');
+
 import { Orchestrator } from '../_shared/orchestrator.ts';
 import { TelegramUpdate, Environment } from '../_shared/types.ts';
 import { validateEnv } from '../_shared/utils.ts';
 
-// CORS headers for development
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+Deno.serve(async (req: Request) => {
+  const url = new URL(req.url);
+  
+  // Принимаем только POST на /telegram-webhook
+  if (req.method !== 'POST' || !url.pathname.endsWith('/telegram-webhook')) {
+    return new Response('Not found', { status: 404 });
   }
 
   try {
@@ -29,26 +27,15 @@ serve(async (req) => {
 
     const env = Deno.env.toObject() as unknown as Environment;
 
-    // Only accept POST requests
-    if (req.method !== 'POST') {
-      return new Response(
-        JSON.stringify({ error: 'Method not allowed' }),
-        { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    // Не проверяем Authorization, просто читаем update
+    const update: TelegramUpdate = await req.json().catch(() => null);
+    
+    if (!update || !update.update_id) {
+      console.error('Invalid update received');
+      return new Response('Bad request', { status: 400 });
     }
-
-    // Parse Telegram update
-    const update: TelegramUpdate = await req.json();
 
     console.log('Received update:', JSON.stringify(update, null, 2));
-
-    // Validate update has required fields
-    if (!update.update_id) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid update' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
 
     // Initialize orchestrator
     const orchestrator = new Orchestrator(
@@ -70,27 +57,17 @@ serve(async (req) => {
     console.log('Responding to Telegram with 200 OK');
     
     // Respond to Telegram immediately
-    return new Response(
-      JSON.stringify({ ok: true }),
-      { 
-        status: 200, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
-    );
+    return new Response('OK', { status: 200 });
 
   } catch (error) {
     console.error('Webhook error:', error);
     
-    return new Response(
-      JSON.stringify({ 
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
-    );
+    return new Response(JSON.stringify({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 });
-
