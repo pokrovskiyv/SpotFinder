@@ -211,7 +211,7 @@ export class TelegramClient {
   async sendPhotoGroup(
     chatId: number,
     photos: PlacePhoto[],
-    getPhotoUrl: (photoReference: string) => string
+    getPhotoUrl: (photoReference: string, maxWidth?: number) => string
   ): Promise<void> {
     if (photos.length === 0) return;
     
@@ -220,7 +220,7 @@ export class TelegramClient {
 
     const media = photosToSend.map((photo, index) => ({
       type: 'photo',
-      media: getPhotoUrl(photo.photo_reference),
+      media: getPhotoUrl(photo.photo_reference, 800),
     }));
 
     const response = await fetch(`${this.apiBase}/sendMediaGroup`, {
