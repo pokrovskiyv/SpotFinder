@@ -279,7 +279,6 @@ spotfinder/
 
 ### ✅ v1.0 - MVP (Завершено)
 - Базовый поиск по естественному языку
-- 5 категорий мест
 - Контекстные диалоги
 - Управление геолокацией
 
@@ -302,22 +301,18 @@ spotfinder/
 ## 📞 Поддержка
 
 - 📧 Email: pokrovskiy.v@gmail.com
-- 💬 Telegram: [@SpotFinderSupport](https://t.me/SpotFinderSupport)
-- 🐛 Issues: [GitHub Issues](https://github.com/your-username/spotfinder/issues)
+- 💬 Telegram: [@v_pokrovskiy](https://t.me/v_pokrovskiy)
 
 ## 🙏 Благодарности
 
 - Google за Gemini API и Maps Platform
 - Supabase за отличную платформу
 - Telegram за Bot API
-- Всем контрибьюторам проекта
 
 ---
 
 <div align="center">
 
-**Сделано с ❤️ командой SpotFinder**
-
-[⭐ Поставьте звезду](https://github.com/your-username/spotfinder) | [🐛 Сообщить об ошибке](https://github.com/your-username/spotfinder/issues) | [💡 Предложить функцию](https://github.com/your-username/spotfinder/issues/new)
+**Сделано Vitaliy Pokrovskiy**
 
 </div>
