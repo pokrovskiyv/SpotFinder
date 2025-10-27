@@ -1,3 +1,4 @@
+/* @supabase/functions-ignore */
 // Main Telegram Webhook Handler - Entry point for all Telegram updates
 
 console.info('telegram-webhook started');
