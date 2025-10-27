@@ -357,21 +357,34 @@ export class Orchestrator {
       
       const details = await this.geminiClient.getPlaceDetails(placeId, true);
       
-      // Send photos if available
+      // Send photos if available (with error handling)
       if (details.photos && details.photos.length > 0) {
-        await this.telegramClient.sendPhotoGroup(
-          chatId,
-          details.photos,
-          (ref, maxWidth) => this.geminiClient.getPhotoUrl(ref, maxWidth)
-        );
+        try {
+          await this.telegramClient.sendPhotoGroup(
+            chatId,
+            details.photos,
+            (ref, maxWidth) => this.geminiClient.getPhotoUrl(ref, maxWidth)
+          );
+        } catch (photoError) {
+          console.error('Failed to send photos:', photoError);
+          // Continue without photos
+        }
       }
       
-      // Send reviews
-      await this.telegramClient.sendMessage({
-        chatId,
-        text: formatReviewsMessage(details),
-        parseMode: 'Markdown',
-      });
+      // Send reviews (без Markdown для безопасности)
+      try {
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: formatReviewsMessage(details),
+        });
+      } catch (msgError) {
+        console.error('Failed to send reviews:', msgError);
+        // Try to send simple error message
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: 'Не удалось загрузить отзывы. Попробуйте позже.',
+        });
+      }
     } else if (action === 'next') {
       // Show next place from search results
       const lastResults = await this.sessionManager.getLastResults(userId);

@@ -134,7 +134,7 @@ export function formatPlaceDetails(place: PlaceResult): string {
  * Format reviews and photos for a place
  */
 export function formatReviewsMessage(place: PlaceResult): string {
-  let message = `📝 **Отзывы о ${place.name}**\n\n`;
+  let message = `📝 Отзывы о ${place.name}\n\n`;
 
   if (!place.reviews || place.reviews.length === 0) {
     return message + 'К сожалению, отзывы отсутствуют.';
