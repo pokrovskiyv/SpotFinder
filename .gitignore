@@ -1,0 +1,66 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+env.local
+
+# Supabase
+.branches
+.temp
+**/.supabase
+
+# Editor
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Dependencies
+node_modules/
+deno.lock
+
+# Build
+dist/
+build/
+*.js.map
+
+# Secrets
+*.pem
+*.key
+secrets/
+
+
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-debug.log
+# Dependency directories
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# OS specific
+
+# Task files
+# tasks.json
+# tasks/
+
+# Test coverage
+coverage/
+.coverage/
+*.lcov 

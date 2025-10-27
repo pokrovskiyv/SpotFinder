@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "start": "deno run --allow-all --watch index.ts"
+  },
+  "imports": {
+    "supabase": "https://esm.sh/@supabase/supabase-js@2"
+  }
+}
+

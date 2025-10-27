@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "test": "deno test --allow-all",
+    "test:coverage": "deno test --allow-all --coverage=coverage/",
+    "coverage": "deno coverage coverage/ --lcov --output=coverage/lcov.info"
+  },
+  "test": {
+    "include": ["**/*_test.ts"]
+  },
+  "imports": {
+    "supabase": "https://esm.sh/@supabase/supabase-js@2"
+  }
+}
