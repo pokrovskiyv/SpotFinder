@@ -141,6 +141,31 @@ supabase functions deploy telegram-webhook
 ./scripts/setup-webhook.sh
 ```
 
+> 📚 **Подробные инструкции:** См. [docs/DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md) для полного руководства по развертыванию
+
+## 📚 Документация
+
+Вся документация проекта организована в папке `docs/`:
+
+- 📖 **[docs/README.md](docs/README.md)** - Индекс всей документации
+- 🚀 **[docs/QUICKSTART.md](docs/QUICKSTART.md)** - Быстрый старт
+- 🏗️ **[docs/Architecture.md](docs/Architecture.md)** - Техническая архитектура
+- 📋 **[docs/PRD.md](docs/PRD.md)** - Product Requirements Document
+- 🔒 **[docs/SECURITY.md](docs/security/SECURITY.md)** - Безопасность
+- 🚀 **[docs/DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md)** - Развертывание
+- 🧪 **[docs/TESTING.md](docs/development/TESTING.md)** - Тестирование
+
+### Структура документации
+
+```
+docs/
+├── 📁 deployment/          # Развертывание и миграции
+├── 📁 development/         # Разработка и тестирование  
+├── 📁 security/           # Безопасность
+├── 📁 scripts/            # Скрипты и утилиты
+└── 📄 *.md               # Основная документация
+```
+
 ## 📖 Использование
 
 ### Команды бота
@@ -219,6 +244,12 @@ supabase functions serve --env-file .env.local
 
 ```
 spotfinder/
+├── 📁 docs/                    # 📚 Вся документация
+│   ├── 📁 deployment/          # Развертывание и миграции
+│   ├── 📁 development/         # Разработка и тестирование  
+│   ├── 📁 security/           # Безопасность
+│   ├── 📁 scripts/            # Скрипты и утилиты
+│   └── 📄 *.md               # Основная документация
 ├── 📁 supabase/
 │   ├── 📁 functions/
 │   │   ├── 📁 _shared/          # Общие модули
@@ -229,16 +260,13 @@ spotfinder/
 │   │   └── 📁 telegram-webhook/ # Webhook endpoint
 │   └── 📁 migrations/           # SQL миграции
 ├── 📁 scripts/                  # Скрипты развертывания
-├── 📁 Docs/                     # Техническая документация
 ├── 📄 README.md                 # Этот файл
-├── 📄 SECURITY.md              # Инструкции по безопасности
-├── 📄 QUICKSTART.md            # Быстрый старт
-└── 📄 PRD.md                   # Product Requirements Document
+└── 📄 package.json              # Зависимости проекта
 ```
 
 ## 🤝 Вклад в проект
 
-Мы приветствуем вклад в развитие SpotFinder! Пожалуйста, ознакомьтесь с [CONTRIBUTING.md](CONTRIBUTING.md) для получения подробной информации.
+Мы приветствуем вклад в развитие SpotFinder! Пожалуйста, ознакомьтесь с [docs/development/CONTRIBUTING.md](docs/development/CONTRIBUTING.md) для получения подробной информации.
 
 ### Как помочь:
 
