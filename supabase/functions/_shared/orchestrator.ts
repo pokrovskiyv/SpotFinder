@@ -352,37 +352,101 @@ export class Orchestrator {
     const index = parseInt(indexStr);
 
     if (action === 'reviews') {
-      // Get reviews and photos for the place
-      await this.telegramClient.sendTyping(chatId);
+      console.log(`Reviews callback: placeId=${placeId}, index=${index}`);
       
-      const details = await this.geminiClient.getPlaceDetails(placeId, true);
-      
-      // Send photos if available (with error handling)
-      if (details.photos && details.photos.length > 0) {
-        try {
-          await this.telegramClient.sendPhotoGroup(
-            chatId,
-            details.photos,
-            (ref, maxWidth) => this.geminiClient.getPhotoUrl(ref, maxWidth)
-          );
-        } catch (photoError) {
-          console.error('Failed to send photos:', photoError);
-          // Continue without photos
-        }
+      // Валидация place_id
+      if (!placeId || placeId.trim() === '' || placeId === 'undefined') {
+        console.error('Invalid place_id:', placeId);
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: 'Ошибка: некорректный идентификатор места.',
+        });
+        return;
       }
       
-      // Send reviews (без Markdown для безопасности)
+      await this.telegramClient.sendTyping(chatId);
+      
       try {
+        console.log('Fetching place details with reviews...');
+        const details = await this.geminiClient.getPlaceDetails(placeId, true);
+        console.log(`Place details fetched: ${details.name}, reviews: ${details.reviews?.length || 0}, photos: ${details.photos?.length || 0}`);
+        
+        // Проверка: есть ли хоть что-то для отправки
+        const hasPhotos = details.photos && details.photos.length > 0;
+        const hasReviews = details.reviews && details.reviews.length > 0;
+        
+        if (!hasPhotos && !hasReviews) {
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: `К сожалению, для места "${details.name}" пока нет отзывов и фотографий.`,
+          });
+          return;
+        }
+        
+        // Send photos if available
+        if (hasPhotos) {
+          console.log(`Sending ${details.photos.length} photos...`);
+          try {
+            await this.telegramClient.sendPhotoGroup(
+              chatId,
+              details.photos,
+              (ref, maxWidth) => this.geminiClient.getPhotoUrl(ref, maxWidth)
+            );
+            console.log('Photos sent successfully');
+          } catch (photoError) {
+            console.error('Failed to send photos:', photoError);
+            // Continue without photos
+          }
+        }
+        
+        // Send reviews if available
+        if (hasReviews) {
+          console.log('Sending reviews message...');
+          try {
+            const reviewsText = formatReviewsMessage(details);
+            console.log(`Reviews text length: ${reviewsText.length}`);
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: reviewsText,
+            });
+            console.log('Reviews sent successfully');
+          } catch (msgError) {
+            console.error('Failed to send reviews:', msgError);
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: 'Не удалось отправить отзывы. Попробуйте позже.',
+            });
+          }
+        } else if (hasPhotos) {
+          // Есть фото, но нет отзывов
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: `Фотографии ${details.name} отправлены. Отзывы пока недоступны.`,
+          });
+        }
+        
+      } catch (error) {
+        console.error('Error in reviews callback:', error);
+        console.error('Error message:', error instanceof Error ? error.message : String(error));
+        
+        // Отправить понятное сообщение в зависимости от ошибки
+        let userMessage = 'Не удалось загрузить информацию о месте. ';
+        
+        if (error instanceof Error) {
+          if (error.message.includes('INVALID_REQUEST')) {
+            userMessage += 'Информация о месте устарела.';
+          } else if (error.message.includes('NOT_FOUND')) {
+            userMessage += 'Место не найдено или удалено.';
+          } else if (error.message.includes('удалено')) {
+            userMessage += error.message;
+          } else {
+            userMessage += 'Попробуйте другое место.';
+          }
+        }
+        
         await this.telegramClient.sendMessage({
           chatId,
-          text: formatReviewsMessage(details),
-        });
-      } catch (msgError) {
-        console.error('Failed to send reviews:', msgError);
-        // Try to send simple error message
-        await this.telegramClient.sendMessage({
-          chatId,
-          text: 'Не удалось загрузить отзывы. Попробуйте позже.',
+          text: userMessage,
         });
       }
     } else if (action === 'next') {

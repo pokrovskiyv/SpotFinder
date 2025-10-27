@@ -375,6 +375,8 @@ export class GeminiClient {
    * Get place details by Place ID
    */
   async getPlaceDetails(placeId: string, includeReviews = false): Promise<PlaceResult> {
+    console.log(`getPlaceDetails: placeId=${placeId}, includeReviews=${includeReviews}`);
+    
     const url = `https://maps.googleapis.com/maps/api/place/details/json`;
     
     const fields = includeReviews 
@@ -389,39 +391,88 @@ export class GeminiClient {
     });
 
     const response = await fetch(`${url}?${params}`);
-    
+
     if (!response.ok) {
-      throw new Error('Failed to get place details');
+      const errorText = await response.text();
+      console.error(`Places API HTTP error (${response.status}):`, errorText);
+      throw new Error(`Places API HTTP error: ${response.status}`);
     }
 
     const data = await response.json();
-    
+    console.log('Places API response status:', data.status);
+
+    // Обработка различных статусов
+    if (data.status === 'INVALID_REQUEST') {
+      console.error('INVALID_REQUEST - trying without reviews/photos');
+      
+      // Если запрос с отзывами не работает, попробуем без них
+      if (includeReviews) {
+        console.log('Retrying without reviews/photos...');
+        return await this.getPlaceDetails(placeId, false);
+      }
+      
+      throw new Error(`Place details error: ${data.status}`);
+    }
+
+    if (data.status === 'NOT_FOUND') {
+      throw new Error('Место не найдено или удалено');
+    }
+
     if (data.status !== 'OK') {
+      console.error('Places API error:', data);
       throw new Error(`Place details error: ${data.status}`);
     }
 
     const place = data.result;
+    
+    if (!place) {
+      throw new Error('No place data in response');
+    }
+
+    // Build result
     const result: PlaceResult = {
       place_id: placeId,
-      name: place.name,
+      name: place.name || 'Без названия',
       address: place.formatted_address,
       rating: place.rating,
       price_level: place.price_level,
       is_open: place.opening_hours?.open_now,
+      geometry: place.geometry ? {
+        location: {
+          lat: place.geometry.location.lat,
+          lng: place.geometry.location.lng,
+        }
+      } : undefined,
     };
 
-    // Process reviews if requested
-    if (includeReviews && place.reviews) {
-      result.reviews = await this.processReviews(place.reviews);
-    }
-
-    // Process photos (limit to 5)
-    if (place.photos) {
-      result.photos = place.photos.slice(0, 5).map((photo: any) => ({
-        photo_reference: photo.photo_reference,
-        width: photo.width,
-        height: photo.height,
-      }));
+    // Process reviews if requested AND available
+    if (includeReviews) {
+      if (place.reviews && Array.isArray(place.reviews) && place.reviews.length > 0) {
+        console.log(`Processing ${place.reviews.length} reviews...`);
+        try {
+          result.reviews = await this.processReviews(place.reviews);
+          console.log(`Processed ${result.reviews.length} reviews`);
+        } catch (reviewError) {
+          console.error('Failed to process reviews:', reviewError);
+          result.reviews = [];
+        }
+      } else {
+        console.log('No reviews available from API');
+        result.reviews = [];
+      }
+      
+      // Process photos
+      if (place.photos && Array.isArray(place.photos) && place.photos.length > 0) {
+        console.log(`Processing ${place.photos.length} photos...`);
+        result.photos = place.photos.slice(0, 5).map((photo: any) => ({
+          photo_reference: photo.photo_reference,
+          width: photo.width,
+          height: photo.height,
+        }));
+      } else {
+        console.log('No photos available from API');
+        result.photos = [];
+      }
     }
 
     return result;
