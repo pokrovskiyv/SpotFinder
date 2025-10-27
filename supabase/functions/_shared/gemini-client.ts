@@ -254,7 +254,8 @@ export class GeminiClient {
             });
           }
           
-          return { ...place, distance };
+          // Ensure geometry is preserved
+          return { ...place, distance, geometry: place.geometry };
         });
         
         allResults = [...allResults, ...resultsWithDistance];
@@ -320,11 +321,11 @@ export class GeminiClient {
       rating: place.rating,
       price_level: place.price_level,
       is_open: place.opening_hours?.open_now,
+      geometry: place.geometry, // Store geometry for directions
       distance: calculateDistance(location, {
         lat: place.geometry.location.lat,
         lon: place.geometry.location.lng,
       }),
-      geometry: place.geometry, // Store for distance calculation later
     }));
   }
 
@@ -367,7 +368,7 @@ export class GeminiClient {
       rating: place.rating,
       price_level: place.price_level,
       is_open: place.opening_hours?.open_now,
-      geometry: place.geometry, // Store for distance calculation
+      geometry: place.geometry, // Store geometry for directions
     }));
   }
 
