@@ -29,11 +29,22 @@ export class Orchestrator {
     geminiApiKey: string,
     mapsApiKey: string
   ) {
+    console.log('Orchestrator: Initializing...');
+    console.log('Orchestrator: Creating SessionManager...');
     this.sessionManager = new SessionManager(supabaseUrl, supabaseKey);
+    console.log('Orchestrator: SessionManager created');
+    console.log('Orchestrator: Creating UserManager...');
     this.userManager = new UserManager(supabaseUrl, supabaseKey);
+    console.log('Orchestrator: UserManager created');
+    console.log('Orchestrator: Creating GeminiClient...');
     this.geminiClient = new GeminiClient(geminiApiKey, mapsApiKey);
+    console.log('Orchestrator: GeminiClient created');
+    console.log('Orchestrator: Creating TelegramClient...');
     this.telegramClient = new TelegramClient(telegramToken);
+    console.log('Orchestrator: TelegramClient created');
+    console.log('Orchestrator: Creating ContextHandler...');
     this.contextHandler = new ContextHandler();
+    console.log('Orchestrator: Initialized successfully');
   }
 
   /**
@@ -108,13 +119,19 @@ export class Orchestrator {
     const chatId = message.chat.id;
     const userId = message.from.id;
 
+    console.log(`HandleCommand: Received command "${command}" from chatId ${chatId}`);
+
     switch (command) {
       case '/start':
+        console.log('HandleCommand: Processing /start command');
+        const welcomeMsg = formatWelcomeMessage(message.from.first_name);
+        console.log('HandleCommand: Sending welcome message...');
         await this.telegramClient.sendMessage({
           chatId,
-          text: formatWelcomeMessage(message.from.first_name),
+          text: welcomeMsg,
           replyMarkup: this.telegramClient.createLocationButton('📍 Поделиться геолокацией'),
         });
+        console.log('HandleCommand: Welcome message sent successfully');
         break;
 
       case '/help':
