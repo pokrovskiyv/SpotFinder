@@ -1,4 +1,4 @@
 {
-  "permissions": "public"
+  "verify_jwt": false
 }
 
