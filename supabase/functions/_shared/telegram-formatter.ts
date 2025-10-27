@@ -193,3 +193,37 @@ export function formatWelcomeMessage(firstName: string): string {
 Чтобы начать, поделись своей геолокацией 📍`;
 }
 
+/**
+ * Create inline keyboard for donation amounts
+ */
+export function createDonateButtons(): InlineButton[][] {
+  return [
+    [
+      { text: BUTTONS.DONATE_50, callback_data: 'donate_50' },
+      { text: BUTTONS.DONATE_100, callback_data: 'donate_100' },
+    ],
+    [
+      { text: BUTTONS.DONATE_200, callback_data: 'donate_200' },
+      { text: BUTTONS.DONATE_500, callback_data: 'donate_500' },
+    ],
+    [
+      { text: BUTTONS.DONATE_1000, callback_data: 'donate_1000' },
+      { text: BUTTONS.DONATE_2500, callback_data: 'donate_2500' },
+    ],
+  ];
+}
+
+/**
+ * Create donate button for after reviews
+ */
+export function createDonateButton(): InlineButton[][] {
+  return [
+    [
+      {
+        text: '☕ Поддержать проект',
+        callback_data: 'donate_menu',
+      },
+    ],
+  ];
+}
+
