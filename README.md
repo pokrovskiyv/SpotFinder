@@ -301,7 +301,7 @@ spotfinder/
 
 ## 📞 Поддержка
 
-- 📧 Email: support@spotfinder.ai
+- 📧 Email: pokrovskiy.v@gmail.com
 - 💬 Telegram: [@SpotFinderSupport](https://t.me/SpotFinderSupport)
 - 🐛 Issues: [GitHub Issues](https://github.com/your-username/spotfinder/issues)
 
