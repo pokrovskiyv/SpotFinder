@@ -345,7 +345,7 @@ export class Orchestrator {
         await this.telegramClient.sendPhotoGroup(
           chatId,
           details.photos,
-          (ref) => this.geminiClient.getPhotoUrl(ref)
+          (ref, maxWidth) => this.geminiClient.getPhotoUrl(ref, maxWidth)
         );
       }
       
