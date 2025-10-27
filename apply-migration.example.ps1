@@ -1,4 +1,8 @@
 # Apply donation migration via Supabase REST API
+# 
+# IMPORTANT: Copy this file to apply-migration.ps1 and set environment variables:
+# $env:SUPABASE_URL = "https://your-project.supabase.co"
+# $env:SUPABASE_SERVICE_ROLE_KEY = "your_service_role_key"
 
 $SUPABASE_URL = $env:SUPABASE_URL
 $SUPABASE_KEY = $env:SUPABASE_SERVICE_ROLE_KEY
@@ -26,11 +30,10 @@ try {
     Write-Host ""
     Write-Host "✅ SOLUTION: Manually apply via Dashboard (2 minutes)" -ForegroundColor Green
     Write-Host ""
-    Write-Host "1. Open: https://app.supabase.com/project/icnnwmjrprufrohiyfpm/sql/new" -ForegroundColor White
+    Write-Host "1. Open: https://app.supabase.com/project/YOUR_PROJECT_ID/sql/new" -ForegroundColor White
     Write-Host "2. Copy SQL from: supabase/migrations/007_create_donations_table.sql" -ForegroundColor White
     Write-Host "3. Paste and Run" -ForegroundColor White
     
 } catch {
     Write-Host "Error: $_" -ForegroundColor Red
 }
-

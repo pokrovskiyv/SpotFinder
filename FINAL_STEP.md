@@ -10,7 +10,7 @@
 
 ### Применить миграцию вручную (не автоматизируется):
 
-**URL:** https://app.supabase.com/project/icnnwmjrprufrohiyfpm/sql/new
+**URL:** https://app.supabase.com/project/YOUR_PROJECT_ID/sql/new
 
 **SQL для копирования:**
 ```sql

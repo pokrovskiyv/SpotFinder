@@ -1,4 +1,8 @@
 # Install Telegram Webhook with CORRECT public URL
+#
+# IMPORTANT: Copy this file to install-webhook-correct.ps1 and set environment variables:
+# $env:TELEGRAM_BOT_TOKEN = "your_telegram_bot_token"
+# $env:SUPABASE_URL = "https://your-project.supabase.co"
 
 # Check if TELEGRAM_BOT_TOKEN is set
 if (-not $env:TELEGRAM_BOT_TOKEN) {
@@ -38,4 +42,3 @@ if ($status.result.url -eq $webhookUrl) {
     Write-Host ""
     Write-Host "❌ Webhook установлен неправильно. URL: $($status.result.url)" -ForegroundColor Red
 }
-

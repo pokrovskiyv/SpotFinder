@@ -1,4 +1,8 @@
 # Verify Supabase migrations were applied successfully
+#
+# IMPORTANT: Copy this file to verify-migrations.ps1 and set environment variables:
+# $env:SUPABASE_URL = "https://your-project.supabase.co"
+# $env:SUPABASE_SERVICE_ROLE_KEY = "your_service_role_key"
 
 $projectUrl = $env:SUPABASE_URL
 $serviceRoleKey = $env:SUPABASE_SERVICE_ROLE_KEY

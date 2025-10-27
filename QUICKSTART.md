@@ -2,6 +2,10 @@
 
 Самое минимальное руководство для запуска бота за 15 минут.
 
+## 🔒 Безопасность
+
+**КРИТИЧЕСКИ ВАЖНО:** Перед началом работы прочитайте [SECURITY.md](SECURITY.md). Никогда не коммитьте файлы с реальными API ключами!
+
 ## Предварительные требования
 
 - ✅ Аккаунт Supabase
@@ -14,19 +18,39 @@
 1. Открой [@BotFather](https://t.me/BotFather) в Telegram
 2. Отправь `/newbot`
 3. Следуй инструкциям, получи токен
-4. Сохрани токен: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`
+4. **НЕ КОММИТЬТЕ ТОКЕН!** Используйте переменные окружения
 
 ### Google/Gemini API
 1. Перейди на [Google AI Studio](https://aistudio.google.com/app/apikey)
 2. Нажми "Get API Key"
-3. Сохрани ключ
+3. **НЕ КОММИТЬТЕ КЛЮЧ!** Используйте переменные окружения
 
 4. Перейди в [Google Cloud Console](https://console.cloud.google.com)
 5. Включи "Places API (New)"
 6. Создай API ключ
-7. Сохрани ключ
+7. **НЕ КОММИТЬТЕ КЛЮЧ!** Используйте переменные окружения
 
-## Шаг 2: Настройка Supabase (5 минут)
+## Шаг 2: Настройка переменных окружения
+
+**Windows PowerShell:**
+```powershell
+$env:TELEGRAM_BOT_TOKEN = "your_telegram_token"
+$env:GEMINI_API_KEY = "your_gemini_key"
+$env:GOOGLE_MAPS_API_KEY = "your_google_maps_key"
+$env:SUPABASE_URL = "https://your-project.supabase.co"
+$env:SUPABASE_SERVICE_ROLE_KEY = "your_service_role_key"
+```
+
+**Windows CMD:**
+```cmd
+set TELEGRAM_BOT_TOKEN=your_telegram_token
+set GEMINI_API_KEY=your_gemini_key
+set GOOGLE_MAPS_API_KEY=your_google_maps_key
+set SUPABASE_URL=https://your-project.supabase.co
+set SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+```
+
+## Шаг 3: Настройка Supabase (5 минут)
 
 ### Создание проекта
 1. Перейди на [supabase.com](https://supabase.com)
@@ -43,7 +67,7 @@
    - `005_create_search_history_table.sql`
    - `006_create_places_cache_table.sql`
 
-## Шаг 3: Deploy бота (5 минут)
+## Шаг 4: Deploy бота (5 минут)
 
 ### Установка Supabase CLI
 

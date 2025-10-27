@@ -65,11 +65,23 @@ coverage/
 .coverage/
 *.lcov 
 
+# Scripts with potential sensitive data
+apply-migration.ps1
+verify-migrations.ps1
+install-webhook-correct.ps1
+fix-bot.ps1
+set-environment-variables.ps1
+redeploy-function.ps1
+check-webhook-status.ps1
+update-commands.ps1
+apply-migration-manual.ps1
+verify-fix.ps1
+install-webhook.ps1
+
 # Documentation with sensitive information
 DIAGNOSTIC_STEPS.txt
 CURRENT_ACTION.txt
 FIX_INSTRUCTIONS_SUMMARY.md
-fix-bot.ps1
 FIX_BOT_STEP_BY_STEP.md
 CRITICAL_FIX_REQUIRED.md
 FIX_WEBHOOK_ERROR.md
