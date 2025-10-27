@@ -1,0 +1,15 @@
+# Task ID: 1
+# Title: Настройка инфраструктуры и базы данных
+# Status: done
+# Dependencies: None
+# Priority: high
+# Description: Настройка Supabase проекта, PostgreSQL базы данных с PostGIS расширением и основных таблиц
+# Details:
+- Создать Supabase проект
+- Включить PostGIS расширение
+- Создать таблицы: users, sessions, user_preferences, search_history, places_cache
+- Настроить Row Level Security (RLS)
+- Создать необходимые индексы для геопространственных запросов
+
+# Test Strategy:
+Проверка подключения к БД, выполнение миграций, тестирование RLS политик

@@ -1,0 +1,15 @@
+# Task ID: 12
+# Title: Обработка команд бота
+# Status: done
+# Dependencies: 2, 6
+# Priority: high
+# Description: Реализация обработчиков для команд /start, /help, /location, /settings
+# Details:
+- /start: приветствие, создание пользователя, запрос геолокации
+- /help: справка по использованию бота
+- /location: обновление геолокации
+- /settings: управление предпочтениями
+- Inline keyboard для быстрых действий
+
+# Test Strategy:
+Тестирование каждой команды, проверка UI

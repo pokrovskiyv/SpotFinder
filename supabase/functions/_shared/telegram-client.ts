@@ -238,5 +238,62 @@ export class TelegramClient {
       // Don't throw - photos are optional
     }
   }
+
+  /**
+   * Send invoice for Telegram Stars payment
+   */
+  async sendInvoice(options: {
+    chatId: number;
+    title: string;
+    description: string;
+    payload: string;
+    amount: number;
+    currency?: string;
+  }): Promise<void> {
+    const { chatId, title, description, payload, amount, currency = 'XTR' } = options;
+
+    const response = await fetch(`${this.apiBase}/sendInvoice`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        title,
+        description,
+        payload,
+        provider_token: '', // Empty string for Telegram Stars (XTR)
+        currency,
+        prices: [{ label: 'Поддержка бота', amount: amount }], // amount in Stars (cents)
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to send invoice: ${error}`);
+    }
+  }
+
+  /**
+   * Answer pre-checkout query to approve payment
+   */
+  async answerPreCheckoutQuery(
+    preCheckoutQueryId: string,
+    ok: boolean,
+    errorMessage?: string
+  ): Promise<void> {
+    const payload: Record<string, unknown> = {
+      pre_checkout_query_id: preCheckoutQueryId,
+      ok,
+    };
+
+    if (!ok && errorMessage) {
+      payload.error_message = errorMessage;
+    }
+
+    await fetch(`${this.apiBase}/answerPreCheckoutQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
 }
 

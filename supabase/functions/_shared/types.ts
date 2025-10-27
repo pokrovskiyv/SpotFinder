@@ -22,6 +22,13 @@ export interface TelegramMessage {
     latitude: number;
     longitude: number;
   };
+  successful_payment?: {
+    currency: string;
+    total_amount: number;
+    invoice_payload: string;
+    telegram_payment_charge_id: string;
+    provider_payment_charge_id: string;
+  };
 }
 
 export interface TelegramUpdate {
@@ -32,6 +39,13 @@ export interface TelegramUpdate {
     from: TelegramUser;
     message: TelegramMessage;
     data: string;
+  };
+  pre_checkout_query?: {
+    id: string;
+    from: TelegramUser;
+    currency: string;
+    total_amount: number;
+    invoice_payload: string;
   };
 }
 
@@ -123,6 +137,15 @@ export interface DBSearchHistory {
   returned_place_ids: string[] | null;
   selected_place_id: string | null;
   user_rating: number | null;
+}
+
+export interface DBDonation {
+  donation_id: string;
+  user_id: number;
+  amount_stars: number;
+  telegram_payment_charge_id: string;
+  status: 'completed' | 'pending' | 'refunded';
+  created_at: string;
 }
 
 export interface GeminiRequest {

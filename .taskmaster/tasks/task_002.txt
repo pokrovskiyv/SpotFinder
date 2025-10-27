@@ -1,0 +1,15 @@
+# Task ID: 2
+# Title: Интеграция с Telegram Bot API
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Настройка Telegram бота и webhook для получения сообщений
+# Details:
+- Создать Telegram бота через BotFather
+- Настроить webhook на Supabase Edge Function
+- Реализовать обработку входящих сообщений
+- Настроить команды бота (/start, /help, /location)
+- Реализовать отправку сообщений пользователям
+
+# Test Strategy:
+Тестирование отправки/получения сообщений, проверка webhook

@@ -1,0 +1,15 @@
+# Task ID: 3
+# Title: Интеграция с Google Gemini API
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Настройка клиента для Google Gemini Pro API с поддержкой Maps Grounding
+# Details:
+- Настроить Google Cloud проект и API ключи
+- Реализовать клиент для Gemini API
+- Настроить Maps Grounding для понимания локаций
+- Реализовать обработку ответов от AI
+- Настроить промпты для понимания намерений пользователя
+
+# Test Strategy:
+Unit тесты для клиента API, тестирование различных запросов

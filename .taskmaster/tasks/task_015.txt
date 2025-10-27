@@ -1,0 +1,15 @@
+# Task ID: 15
+# Title: Обработка ошибок и fallback
+# Status: done
+# Dependencies: 9
+# Priority: high
+# Description: Comprehensive система обработки ошибок с понятными сообщениями
+# Details:
+- Try-catch блоки на всех уровнях
+- Понятные сообщения об ошибках для пользователей
+- Логирование ошибок для отладки
+- Fallback на упрощенный поиск при сбое AI
+- Retry логика для API вызовов
+
+# Test Strategy:
+Тестирование различных сценариев ошибок

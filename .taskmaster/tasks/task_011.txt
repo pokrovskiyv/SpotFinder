@@ -1,0 +1,15 @@
+# Task ID: 11
+# Title: Кэширование Places API результатов
+# Status: done
+# Dependencies: 4
+# Priority: medium
+# Description: Система кэширования результатов из Google Maps для оптимизации запросов
+# Details:
+- Создание ключей кэша на основе геопозиции и категории
+- TTL кэша 24 часа
+- Geo-hash группировка для ближайших локаций
+- Invalidation кэша при необходимости
+- Мониторинг cache hit rate (target >40%)
+
+# Test Strategy:
+Тестирование hit rate, TTL, geo-hash логики

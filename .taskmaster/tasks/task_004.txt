@@ -1,0 +1,15 @@
+# Task ID: 4
+# Title: Интеграция с Google Maps Places API
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Настройка поиска мест через Google Maps Places API (New)
+# Details:
+- Настроить Google Maps Platform API ключи
+- Реализовать поиск мест по категориям
+- Реализовать поиск по радиусу от геолокации
+- Получение детальной информации о местах
+- Обработка рейтингов, часов работы, адресов
+
+# Test Strategy:
+Тестирование поиска мест, проверка корректности данных

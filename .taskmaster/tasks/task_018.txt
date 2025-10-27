@@ -1,0 +1,15 @@
+# Task ID: 18
+# Title: Персонализация и предпочтения
+# Status: pending
+# Dependencies: 6, 9
+# Priority: medium
+# Description: Базовая персонализация на основе пользовательских предпочтений
+# Details:
+- Dietary restrictions (веган, gluten-free, etc.)
+- Preferred transport mode
+- Learning from user's choices
+- Применение предпочтений к поисковым запросам
+- UI для управления предпочтениями через /settings
+
+# Test Strategy:
+Тестирование применения различных предпочтений к поиску

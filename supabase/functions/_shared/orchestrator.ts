@@ -4,14 +4,17 @@ import { SessionManager } from './session-manager.ts';
 import { UserManager } from './user-manager.ts';
 import { GeminiClient } from './gemini-client.ts';
 import { TelegramClient } from './telegram-client.ts';
+import { DonationManager } from './donation-manager.ts';
 import {
   formatPlacesMessage,
   formatWelcomeMessage,
   createPlaceButtons,
   formatReviewsMessage,
+  createDonateButtons,
+  createDonateButton,
 } from './telegram-formatter.ts';
 import { TelegramUpdate, PlaceResult, Location } from './types.ts';
-import { MESSAGES } from './constants.ts';
+import { MESSAGES, DONATE_AMOUNTS } from './constants.ts';
 import { isFollowUpQuestion, extractOrdinal } from './utils.ts';
 import { ContextHandler } from './context-handler.ts';
 
@@ -21,6 +24,7 @@ export class Orchestrator {
   private geminiClient: GeminiClient;
   private telegramClient: TelegramClient;
   private contextHandler: ContextHandler;
+  private donationManager: DonationManager;
 
   constructor(
     supabaseUrl: string,
@@ -42,6 +46,9 @@ export class Orchestrator {
     console.log('Orchestrator: Creating TelegramClient...');
     this.telegramClient = new TelegramClient(telegramToken);
     console.log('Orchestrator: TelegramClient created');
+    console.log('Orchestrator: Creating DonationManager...');
+    this.donationManager = new DonationManager(supabaseUrl, supabaseKey);
+    console.log('Orchestrator: DonationManager created');
     console.log('Orchestrator: Creating ContextHandler...');
     this.contextHandler = new ContextHandler();
     console.log('Orchestrator: Initialized successfully');
@@ -54,7 +61,10 @@ export class Orchestrator {
     console.log('processUpdate called');
     
     try {
-      if (update.message) {
+      if (update.pre_checkout_query) {
+        console.log('Handling pre-checkout query');
+        await this.handlePreCheckout(update.pre_checkout_query);
+      } else if (update.message) {
         console.log('Handling message:', update.message.text || 'location/text');
         await this.handleMessage(update.message);
       } else if (update.callback_query) {
@@ -102,7 +112,9 @@ export class Orchestrator {
     await this.sessionManager.getOrCreateSession(userId);
 
     // Handle different message types
-    if (message.text?.startsWith('/')) {
+    if (message.successful_payment) {
+      await this.handleSuccessfulPayment(message);
+    } else if (message.text?.startsWith('/')) {
       await this.handleCommand(message);
     } else if (message.location) {
       await this.handleLocation(message);
@@ -147,6 +159,11 @@ export class Orchestrator {
           text: MESSAGES.LOCATION_REQUEST,
           replyMarkup: this.telegramClient.createLocationButton('📍 Поделиться геолокацией'),
         });
+        break;
+
+      case '/donate':
+        console.log('HandleCommand: Processing /donate command');
+        await this.handleDonateCommand(message);
         break;
 
       default:
@@ -384,7 +401,7 @@ export class Orchestrator {
         }
         
         // Send photos if available
-        if (hasPhotos) {
+        if (hasPhotos && details.photos) {
           console.log(`Sending ${details.photos.length} photos...`);
           try {
             await this.telegramClient.sendPhotoGroup(
@@ -410,6 +427,15 @@ export class Orchestrator {
               text: reviewsText,
             });
             console.log('Reviews sent successfully');
+            
+            // Добавить сообщение с кнопкой доната
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: '💝 SpotFinder существует благодаря вашей поддержке!\n\nЕсли бот вам помогает, вы можете поддержать его развитие.',
+              replyMarkup: this.telegramClient.createInlineKeyboard(
+                createDonateButton()
+              ),
+            });
           } catch (msgError) {
             console.error('Failed to send reviews:', msgError);
             await this.telegramClient.sendMessage({
@@ -422,6 +448,15 @@ export class Orchestrator {
           await this.telegramClient.sendMessage({
             chatId,
             text: `Фотографии ${details.name} отправлены. Отзывы пока недоступны.`,
+          });
+          
+          // Добавить сообщение с кнопкой доната даже если нет отзывов
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: '💝 SpotFinder существует благодаря вашей поддержке!\n\nЕсли бот вам помогает, вы можете поддержать его развитие.',
+            replyMarkup: this.telegramClient.createInlineKeyboard(
+              createDonateButton()
+            ),
           });
         }
         
@@ -499,6 +534,132 @@ export class Orchestrator {
         'Выбрано! Что еще найти?',
         false
       );
+    } else if (action === 'donate') {
+      // Handle donation buttons
+      if (indexStr === 'menu') {
+        // Handle "donate_menu" callback
+        await this.handleDonateCommand({ chat: { id: chatId }, from: { id: userId } });
+      } else {
+        const amount = parseInt(indexStr);
+        await this.sendDonationInvoice(userId, chatId, amount);
+      }
+    }
+  }
+
+  /**
+   * Handle /donate command - show donation options
+   */
+  private async handleDonateCommand(message: any): Promise<void> {
+    const chatId = message.chat.id;
+    const userId = message.from.id;
+
+    await this.telegramClient.sendMessage({
+      chatId,
+      text: MESSAGES.DONATE_INFO,
+      replyMarkup: this.telegramClient.createInlineKeyboard(createDonateButtons()),
+    });
+  }
+
+  /**
+   * Send donation invoice to user
+   */
+  private async sendDonationInvoice(userId: number, chatId: number, amount: number): Promise<void> {
+    const payload = JSON.stringify({
+      userId,
+      timestamp: Date.now(),
+    });
+
+    await this.telegramClient.sendInvoice({
+      chatId,
+      title: '⭐ Поддержать SpotFinder',
+      description: 'Ваш донат помогает развивать бота и добавлять новые функции!',
+      payload,
+      amount,
+      currency: 'XTR',
+    });
+  }
+
+  /**
+   * Handle pre-checkout query - approve payment
+   */
+  private async handlePreCheckout(query: any): Promise<void> {
+    const queryId = query.id;
+    const payload = query.invoice_payload;
+    
+    console.log('Pre-checkout query received:', queryId);
+    
+    // Validate payload and approve payment
+    try {
+      const payloadData = JSON.parse(payload);
+      const amount = query.total_amount;
+      
+      // Validate amount range (1-2500 Stars)
+      if (amount < 1 || amount > 2500) {
+        await this.telegramClient.answerPreCheckoutQuery(
+          queryId,
+          false,
+          MESSAGES.DONATE_INVALID_AMOUNT
+        );
+        return;
+      }
+
+      // Approve the payment
+      await this.telegramClient.answerPreCheckoutQuery(queryId, true);
+      console.log('Pre-checkout approved for query:', queryId);
+    } catch (error) {
+      console.error('Error processing pre-checkout:', error);
+      await this.telegramClient.answerPreCheckoutQuery(
+        queryId,
+        false,
+        'Ошибка обработки платежа'
+      );
+    }
+  }
+
+  /**
+   * Handle successful payment - save to database and thank user
+   */
+  private async handleSuccessfulPayment(message: any): Promise<void> {
+    const userId = message.from.id;
+    const chatId = message.chat.id;
+    const payment = message.successful_payment;
+
+    console.log('Handling successful payment:', payment);
+
+    try {
+      const paymentId = payment.telegram_payment_charge_id;
+      const amount = payment.total_amount;
+
+      // Check if this payment was already processed
+      const alreadyProcessed = await this.donationManager.donationExists(paymentId);
+      
+      if (alreadyProcessed) {
+        console.log('Payment already processed, skipping...');
+        return;
+      }
+
+      // Create donation record
+      await this.donationManager.createDonation(userId, amount, paymentId);
+
+      // Get total donations for user
+      const total = await this.donationManager.getTotalDonations(userId);
+
+      // Send thank you message
+      const thankYouMsg = MESSAGES.DONATE_THANK_YOU(amount, total);
+      
+      await this.telegramClient.sendMessage({
+        chatId,
+        text: thankYouMsg,
+      });
+
+      console.log('Payment processed successfully');
+    } catch (error) {
+      console.error('Error handling successful payment:', error);
+      // Send generic thank you message even if DB save fails
+      await this.telegramClient.sendMessage({
+        chatId,
+        text: MESSAGES.DONATE_THANK_YOU(payment.total_amount, payment.total_amount),
+      });
     }
   }
 }

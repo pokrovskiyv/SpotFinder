@@ -1,0 +1,15 @@
+# Task ID: 17
+# Title: Скрипты для настройки и деплоя
+# Status: done
+# Dependencies: 2
+# Priority: medium
+# Description: Bash скрипты для автоматизации настройки webhook и команд бота
+# Details:
+- setup-webhook.sh: настройка webhook для Telegram
+- delete-webhook.sh: удаление webhook
+- setup-telegram-commands.sh: настройка команд бота
+- check-status.sh: проверка статуса бота
+- Документирование использования скриптов
+
+# Test Strategy:
+Тестирование скриптов на чистом окружении

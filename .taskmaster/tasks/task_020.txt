@@ -1,0 +1,15 @@
+# Task ID: 20
+# Title: Unit и Integration тесты
+# Status: pending
+# Dependencies: 9, 15
+# Priority: high
+# Description: Comprehensive test suite для обеспечения качества кода
+# Details:
+- Unit тесты для всех основных модулей
+- Integration тесты для основных user flows
+- Mocking внешних API (Telegram, Gemini, Maps)
+- Test coverage target >70%
+- CI/CD интеграция для автоматического запуска тестов
+
+# Test Strategy:
+Automated test execution, coverage reporting
