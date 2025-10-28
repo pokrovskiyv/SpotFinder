@@ -1,7 +1,7 @@
 // Shared utility functions for SpotFinder Bot
 
 import { Location } from './types.ts';
-import { LOCATION_TTL_MINUTES, CITY_ALIASES } from './constants.ts';
+import { LOCATION_TTL_MINUTES } from './constants.ts';
 
 /**
  * Check if location is still valid (not expired)
@@ -50,6 +50,7 @@ export function formatDistance(meters: number): string {
 
 /**
  * Extract ordinal number from text (e.g., "второй" -> 2, "первая" -> 1)
+ * NO REGEX - uses simple string matching
  */
 export function extractOrdinal(text: string): number | null {
   const ordinals: Record<string, number> = {
@@ -78,6 +79,7 @@ export function extractOrdinal(text: string): number | null {
 /**
  * Extract multiple ordinal numbers from text for comparison questions
  * (e.g., "первый и третий" -> [1, 3], "сравни 2 и 5" -> [2, 5])
+ * NO REGEX - uses simple string matching and manual digit extraction
  */
 export function extractMultipleOrdinals(text: string): number[] {
   const ordinals: Record<string, number> = {
@@ -91,12 +93,30 @@ export function extractMultipleOrdinals(text: string): number[] {
   const lowerText = text.toLowerCase();
   const found: number[] = [];
   
-  // Ищем цифры в тексте
-  const digitMatches = text.match(/\d+/g);
-  if (digitMatches) {
-    found.push(...digitMatches.map(d => parseInt(d)).filter(n => n >= 1 && n <= 5));
+  // Extract digits manually without regex
+  let currentNumber = '';
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char >= '0' && char <= '9') {
+      currentNumber += char;
+    } else {
+      if (currentNumber) {
+        const num = parseInt(currentNumber);
+        if (num >= 1 && num <= 5 && !found.includes(num)) {
+          found.push(num);
+        }
+        currentNumber = '';
+      }
+    }
   }
-  
+  // Check last number
+  if (currentNumber) {
+    const num = parseInt(currentNumber);
+    if (num >= 1 && num <= 5 && !found.includes(num)) {
+      found.push(num);
+    }
+  }
+
   // Ищем словесные обозначения
   for (const [key, value] of Object.entries(ordinals)) {
     if (lowerText.includes(key) && !found.includes(value)) {
@@ -110,28 +130,25 @@ export function extractMultipleOrdinals(text: string): number[] {
 
 /**
  * Check if message is a follow-up question
+ * NO REGEX - uses simple string matching
  */
 export function isFollowUpQuestion(text: string): boolean {
-  const followUpPatterns = [
-    // Вопросы с указанием на место по номеру
-    /\bу\s+(него|нее|них|первого|второго|третьего|четвертого|пятого)\b/i,
-    /\b(первый|второй|третий|четвертый|пятый)\b/i,
-    
-    // Референсы на места
-    /\b(этот|этого|тот|того|там|тут|здесь|туда|сюда)\b/i,
-    
-    // Вопросы о деталях
-    /\b(какие|какая|какое|какой)\b/i,
-    /\b(расскажи|покажи)\s+(подробнее|больше|еще|про|о)\b/i,
-    /\b(есть\s+ли|а\s+есть)\b/i,
-    /\b(а\s+(цены|часы|время|парковка|меню|wi-fi|wifi))/i,
-    
-    // Сравнительные вопросы
-    /\b(чем|что\s+лучше|сравни|отличается|отличие|разница)\b/i,
-    /\b(лучше|хуже|дороже|дешевле|ближе|дальше)\b/i,
+  const lowerText = text.toLowerCase();
+  
+  // Keywords that indicate follow-up questions
+  const followUpKeywords = [
+    'у него', 'у нее', 'у них',
+    'первый', 'второй', 'третий', 'четвертый', 'пятый',
+    'этот', 'этого', 'тот', 'того', 'там', 'тут', 'здесь', 'туда', 'сюда',
+    'какие', 'какая', 'какое', 'какой',
+    'расскажи подробнее', 'покажи подробнее',
+    'есть ли', 'а есть',
+    'а цены', 'а часы', 'а время', 'а парковка', 'а меню', 'а wi-fi', 'а wifi',
+    'чем', 'что лучше', 'сравни', 'отличается', 'отличие', 'разница',
+    'лучше', 'хуже', 'дороже', 'дешевле', 'ближе', 'дальше',
   ];
 
-  return followUpPatterns.some(pattern => pattern.test(text));
+  return followUpKeywords.some(keyword => lowerText.includes(keyword));
 }
 
 /**
@@ -194,143 +211,164 @@ export function validateEnv(env: Record<string, string | undefined>, required: s
 }
 
 /**
- * Extract city name from user query
- * Recognizes patterns like "в Москве", "кафе в Питере", "рестораны Москвы", "по Нови Саду"
- * Supports both Cyrillic (Russian) and Latin (international) city names
- * Returns canonical city name or null if no city found
+ * Detect search type from query to determine which Places API method to use
+ * NO REGEX - uses simple string matching
  */
-export function extractCityFromQuery(query: string): string | null {
+export function detectSearchType(query: string): 'specific_place' | 'nearby' | 'general' {
   const lowerQuery = query.toLowerCase().trim();
   
-  // First, check for direct city mentions in any case (known Russian cities)
-  for (const [alias, cityName] of Object.entries(CITY_ALIASES)) {
-    // Check if the alias appears in the query as a whole word
-    const aliasPattern = new RegExp(`\\b${alias}\\b`);
-    if (aliasPattern.test(lowerQuery)) {
-      console.log(`City extracted from query by alias: "${alias}" -> "${cityName}"`);
-      return cityName;
-    }
+  // Check for "ближайш" keywords - use Nearby Search (strict radius)
+  if (lowerQuery.includes('ближайш') || lowerQuery.includes('рядом') || 
+      lowerQuery.includes('около') || lowerQuery.includes('поблизости')) {
+    return 'nearby';
   }
   
-  // Expanded patterns for any cities (Russian and Latin, multi-word)
-  const patterns = [
-    // "в Москве", "в Нови Саде", "в Paris"
-    /\bв\s+([а-яёА-ЯЁa-zA-Z]+(?:[-\s][а-яёА-ЯЁa-zA-Z]+)*(?:е|и|а|ы)?)\b/i,
-    // "по Москве", "по Нови Саду"
-    /\bпо\s+([а-яёА-ЯЁa-zA-Z]+(?:[-\s][а-яёА-ЯЁa-zA-Z]+)*(?:у)?)\b/i,
-    // At the end of query: "кафе Москвы", "места Нови Сада"
-    /\b([а-яёА-ЯЁa-zA-Z]+(?:[-\s][а-яёА-ЯЁa-zA-Z]+)*(?:ы|а|у|ом)?)$/i,
-  ];
+  // Check if query contains capitalized words (likely specific place name)
+  // Example: "Seal Tea в Нови Саде" has multiple capitalized words
+  const words = query.split(' ');
+  const capitalizedWords = words.filter(word => 
+    word.length > 1 && word[0] >= 'A' && word[0] <= 'Z'
+  );
   
-  for (const pattern of patterns) {
-    const match = lowerQuery.match(pattern);
-    if (match && match[1]) {
-      let candidate = match[1];
-      
-      // Remove endings for checking in CITY_ALIASES (Russian grammatical cases)
-      const cleanedCandidate = candidate.toLowerCase().replace(/[еиаыуом]+$/, '');
-      
-      // Check if it's in known cities (Russian aliases)
-      if (CITY_ALIASES[cleanedCandidate]) {
-        console.log(`City extracted: "${candidate}" -> "${CITY_ALIASES[cleanedCandidate]}"`);
-        return CITY_ALIASES[cleanedCandidate];
-      }
-      
-      // If not in known cities, return as is (universal case for international cities)
-      // Capitalize first letter of each word
-      candidate = candidate
-        .split(/[-\s]/)
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
-      
-      console.log(`City extracted (universal): "${candidate}"`);
-      return candidate;
-    }
+  // If has 2+ capitalized words and "в", likely specific place search
+  if (capitalizedWords.length >= 2 && lowerQuery.includes(' в ')) {
+    return 'specific_place';
   }
   
-  console.log(`No city found in query: "${query}"`);
-  return null;
+  // Default: general search (Text Search with wider radius)
+  return 'general';
 }
 
 /**
  * Check if message is a route request
+ * NO REGEX - uses simple string matching
  */
 export function isRouteRequest(text: string): boolean {
-  const routePatterns = [
-    /построй\s+маршрут/i,
-    /построй\s+путь/i,
-    /покажи\s+маршрут/i,
-    /покажи\s+путь/i,
-    /проложи\s+маршрут/i,
-    /проложи\s+путь/i,
-    /маршрут\s+через/i,
-    /путь\s+через/i,
+  const lowerText = text.toLowerCase();
+  
+  const routeKeywords = [
+    'построй маршрут', 'построй путь',
+    'покажи маршрут', 'покажи путь',
+    'проложи маршрут', 'проложи путь',
+    'маршрут через', 'путь через',
+    'построить маршрут',
   ];
   
-  return routePatterns.some(pattern => pattern.test(text));
+  return routeKeywords.some(keyword => lowerText.includes(keyword));
 }
 
 /**
  * Extract place indices from text (e.g., "места 1, 3 и 5" → [1, 3, 5])
+ * NO REGEX - uses simple string matching and manual parsing
  */
 export function extractPlaceIndices(text: string): number[] {
   const indices: number[] = [];
+  const lowerText = text.toLowerCase();
   
-  // Паттерны для поиска номеров
-  const patterns = [
-    /места?\s+(\d+(?:\s*,\s*\d+)*(?:\s+и\s+\d+)?)/i, // "места 1, 3 и 5"
-    /номера?\s+(\d+(?:\s*,\s*\d+)*(?:\s+и\s+\d+)?)/i, // "номера 1, 3 и 5"
-    /через\s+(\d+(?:\s*,\s*\d+)*(?:\s+и\s+\d+)?)/i, // "через 1, 3 и 5"
-    /(\d+(?:\s*,\s*\d+)*(?:\s+и\s+\d+))/i, // "1, 3 и 5" без предлога
-  ];
-  
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      // Извлекаем все цифры
-      const nums = match[1].match(/\d+/g);
-      if (nums) {
-        indices.push(...nums.map(n => parseInt(n)));
+  // Look for keywords that indicate we're looking for place numbers
+  if (lowerText.includes('места') || lowerText.includes('место') ||
+      lowerText.includes('номера') || lowerText.includes('номер') ||
+      lowerText.includes('через')) {
+    
+    // Extract all digits from the text
+    let currentNumber = '';
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      if (char >= '0' && char <= '9') {
+        currentNumber += char;
+      } else {
+        if (currentNumber) {
+          const num = parseInt(currentNumber);
+          if (num >= 1 && num <= 10) { // Reasonable limit
+            indices.push(num);
+          }
+          currentNumber = '';
+        }
       }
-      break;
+    }
+    // Check last number
+    if (currentNumber) {
+      const num = parseInt(currentNumber);
+      if (num >= 1 && num <= 10) {
+        indices.push(num);
+      }
     }
   }
   
-  // Удаляем дубликаты и сортируем
+  // Remove duplicates and sort
   return [...new Set(indices)].sort((a, b) => a - b);
 }
 
 /**
  * Check if user wants to see multiple places
  * Patterns: "покажи N мест", "найди N кафе", "N места", "где можно погулять"
+ * NO REGEX - uses simple string matching
  */
 export function isMultiPlaceRequest(text: string): boolean {
-  const multiPlacePatterns = [
-    /покажи\s+\d+\s+мест/i,
-    /найди\s+\d+/i,
-    /\d+\s+мест/i,
-    /несколько\s+мест/i,
-    /где\s+можно\s+погулять/i, // exploration patterns
-    /что\s+посмотреть/i,
-    /интересные\s+места/i,
+  const lowerText = text.toLowerCase();
+  
+  const multiPlaceKeywords = [
+    'покажи', 'места',
+    'несколько мест',
+    'где можно погулять',
+    'что посмотреть',
+    'интересные места',
   ];
   
-  return multiPlacePatterns.some(pattern => pattern.test(text));
+  // Check for number + "мест" pattern manually
+  if (lowerText.includes('мест') && 
+      (lowerText.includes('2') || lowerText.includes('3') || 
+       lowerText.includes('4') || lowerText.includes('5'))) {
+    return true;
+  }
+  
+  return multiPlaceKeywords.some(keyword => lowerText.includes(keyword));
 }
 
 /**
  * Extract number of places from query
  * Returns number or null if not specified
  * Always limits to maximum 5 places for route compatibility
+ * NO REGEX - uses simple string matching
  */
 export function extractPlaceCount(text: string): number | null {
-  const countMatch = text.match(/(\d+)\s+мест/i);
-  if (countMatch) {
-    const count = parseInt(countMatch[1]);
-    // Strict limit: 2-5 places (Google Maps route waypoint limit)
-    return Math.min(Math.max(count, 2), 5);
+  const lowerText = text.toLowerCase();
+  
+  if (!lowerText.includes('мест')) {
+    return null;
   }
-  // Default for exploration queries without specific number
+  
+  // Extract numbers manually
+  const numbers: number[] = [];
+  let currentNumber = '';
+  
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char >= '0' && char <= '9') {
+      currentNumber += char;
+    } else {
+      if (currentNumber) {
+        numbers.push(parseInt(currentNumber));
+        currentNumber = '';
+      }
+    }
+  }
+  if (currentNumber) {
+    numbers.push(parseInt(currentNumber));
+  }
+  
+  // Find number near "мест"
+  for (const num of numbers) {
+    const numIndex = lowerText.indexOf(num.toString());
+    const mestoIndex = lowerText.indexOf('мест');
+    
+    // Number should be near "мест" (within 20 chars)
+    if (Math.abs(numIndex - mestoIndex) < 20) {
+      // Strict limit: 2-5 places (Google Maps route waypoint limit)
+      return Math.min(Math.max(num, 2), 5);
+    }
+  }
+  
   return null;
 }
 
@@ -345,20 +383,47 @@ function isValidPlaceId(placeId: string | undefined): boolean {
   if (placeId.startsWith('maps_')) return false;
   // Google Place ID should be at least 20 characters
   // Usually starts with ChIJ and is 23-27 characters long
-  return placeId.length >= 20 && /^[A-Za-z0-9_-]+$/.test(placeId);
+  if (placeId.length < 20) return false;
+  
+  // Check alphanumeric without regex - manual validation
+  for (let i = 0; i < placeId.length; i++) {
+    const char = placeId[i];
+    const isAlpha = (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z');
+    const isDigit = char >= '0' && char <= '9';
+    const isSpecial = char === '_' || char === '-';
+    if (!isAlpha && !isDigit && !isSpecial) {
+      return false;
+    }
+  }
+  
+  return true;
 }
 
 /**
  * Check if place_id is valid for use in Google Maps URLs
  * Rejects fake IDs (starting with 'maps_') and too short IDs
  * This is an exported version for use in other modules
+ * NO REGEX - uses manual validation
  */
 export function hasValidPlaceId(placeId: string | undefined): boolean {
   if (!placeId) return false;
   // Reject fake IDs created by our code
   if (placeId.startsWith('maps_')) return false;
   // Google Place ID should be at least 20 characters
-  return placeId.length >= 20 && /^[A-Za-z0-9_-]+$/.test(placeId);
+  if (placeId.length < 20) return false;
+  
+  // Check alphanumeric without regex - manual validation
+  for (let i = 0; i < placeId.length; i++) {
+    const char = placeId[i];
+    const isAlpha = (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z');
+    const isDigit = char >= '0' && char <= '9';
+    const isSpecial = char === '_' || char === '-';
+    if (!isAlpha && !isDigit && !isSpecial) {
+      return false;
+    }
+  }
+  
+  return true;
 }
 
 /**
@@ -464,7 +529,8 @@ export function buildMultiStopRouteUrl(
       waypoints.push(waypoint);
       console.log(`  - Waypoint ${i + 1}: ${waypoint} (coordinates)`);
     } else {
-      console.warn(`  - Waypoint ${i + 1}: skipped (no coordinates for "${place.name || 'unknown'}")`);
+      const placeName = (place as any).name || 'unknown';
+      console.warn(`  - Waypoint ${i + 1}: skipped (no coordinates for "${placeName}")`);
     }
   }
   

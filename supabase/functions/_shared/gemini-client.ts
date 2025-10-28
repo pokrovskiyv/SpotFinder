@@ -440,8 +440,65 @@ export class GeminiClient {
   }
 
   /**
+   * Main search method using only NEW Places API
+   * NO GEMINI GROUNDING - Direct Places API search
+   * Uses smart selection between Nearby and Text Search based on query type
+   */
+  async searchPlacesNew(
+    query: string,
+    location: Location,
+    searchType: 'specific_place' | 'nearby' | 'general',
+    maxResults = 20,
+    excludePlaceIds: string[] = []
+  ): Promise<PlaceResult[]> {
+    console.log(`🔍 Searching with NEW Places API: type=${searchType}, query="${query}"`);
+    
+    let places: PlaceResult[] = [];
+    
+    if (searchType === 'nearby') {
+      // Strict radius search (5km) for "ближайший" queries
+      console.log('Using Nearby Search (strict 5km radius)');
+      places = await this.searchNearbyNew(query, location, MAX_SEARCH_RADIUS);
+    } else if (searchType === 'specific_place') {
+      // Wider search (50km) for specific place names like "Seal Tea в Нови Саде"
+      console.log('Using Text Search (wider 50km radius for specific place)');
+      places = await this.searchTextNew(query, location, 50000);
+    } else {
+      // General search: try Nearby first, then Text Search
+      console.log('Using General Search (Nearby then Text)');
+      
+      // Try Nearby Search first with strict radius
+      places = await this.searchNearbyNew(query, location, MAX_SEARCH_RADIUS);
+      
+      // If not enough results, expand with Text Search
+      if (places.length < MIN_RESULTS_THRESHOLD) {
+        console.log(`Nearby Search found only ${places.length} places, trying Text Search...`);
+        const textResults = await this.searchTextNew(query, location, 50000);
+        places = [...places, ...textResults];
+      }
+    }
+    
+    // Filter by distance (ensure all within MAX_SEARCH_RADIUS)
+    const filtered = places.filter(place => {
+      if (place.distance === undefined) return false;
+      return place.distance <= MAX_SEARCH_RADIUS;
+    });
+    
+    // Deduplicate and sort
+    const deduplicated = deduplicatePlaces(filtered);
+    const sorted = deduplicated.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+    
+    // Exclude already shown places
+    const notShown = sorted.filter(p => p.place_id && !excludePlaceIds.includes(p.place_id));
+    
+    console.log(`Found ${notShown.length} places after filtering (from ${places.length} raw results)`);
+    return notShown.slice(0, maxResults);
+  }
+
+  /**
    * Smart search places with adaptive radius and geographic filtering
    * Uses NEW Places API (New) for better accuracy
+   * @deprecated Use searchPlacesNew instead - this is kept for backward compatibility
    */
   async searchPlaces(
     query: string,
@@ -1228,33 +1285,36 @@ export class GeminiClient {
 
   /**
    * Infer Google Places type from user query
+   * NO REGEX - uses simple string matching
    */
   private inferPlaceType(query: string): string | null {
     const lowerQuery = query.toLowerCase();
     
     // Food & Drinks
-    if (/кафе|coffee|кофе/.test(lowerQuery)) return 'cafe';
-    if (/ресторан|restaurant|поесть|еда/.test(lowerQuery)) return 'restaurant';
-    if (/бар|pub|паб/.test(lowerQuery)) return 'bar';
+    if (lowerQuery.includes('кафе') || lowerQuery.includes('coffee') || lowerQuery.includes('кофе')) return 'cafe';
+    if (lowerQuery.includes('ресторан') || lowerQuery.includes('restaurant') || lowerQuery.includes('поесть') || lowerQuery.includes('еда')) return 'restaurant';
+    if (lowerQuery.includes('бар') || lowerQuery.includes('pub') || lowerQuery.includes('паб')) return 'bar';
     
     // Shopping
-    if (/магазин|shop|store/.test(lowerQuery)) return 'store';
-    if (/супермаркет|supermarket/.test(lowerQuery)) return 'supermarket';
+    if (lowerQuery.includes('магазин') || lowerQuery.includes('shop') || lowerQuery.includes('store')) return 'store';
+    if (lowerQuery.includes('супермаркет') || lowerQuery.includes('supermarket')) return 'supermarket';
     
     // Health
-    if (/аптек|pharmacy/.test(lowerQuery)) return 'pharmacy';
-    if (/больниц|hospital/.test(lowerQuery)) return 'hospital';
+    if (lowerQuery.includes('аптек') || lowerQuery.includes('pharmacy')) return 'pharmacy';
+    if (lowerQuery.includes('больниц') || lowerQuery.includes('hospital')) return 'hospital';
     
     // Finance
-    if (/банк|bank|атм|atm|банкомат/.test(lowerQuery)) return 'bank';
+    if (lowerQuery.includes('банк') || lowerQuery.includes('bank') || lowerQuery.includes('атм') || lowerQuery.includes('atm') || lowerQuery.includes('банкомат')) return 'bank';
     
     // Entertainment & Tourism
-    if (/парк|park|погулять/.test(lowerQuery)) return 'park';
-    if (/музей|museum/.test(lowerQuery)) return 'museum';
-    if (/кино|cinema|movie/.test(lowerQuery)) return 'movie_theater';
+    if (lowerQuery.includes('парк') || lowerQuery.includes('park') || lowerQuery.includes('погулять')) return 'park';
+    if (lowerQuery.includes('музей') || lowerQuery.includes('museum')) return 'museum';
+    if (lowerQuery.includes('кино') || lowerQuery.includes('cinema') || lowerQuery.includes('movie')) return 'movie_theater';
     
     // For route/sightseeing queries, prioritize tourist attractions
-    if (/маршрут|что посмотреть|достопримечательност|tourist|туристическ|интересные места/.test(lowerQuery)) return 'tourist_attraction';
+    if (lowerQuery.includes('маршрут') || lowerQuery.includes('что посмотреть') || 
+        lowerQuery.includes('достопримечательност') || lowerQuery.includes('tourist') || 
+        lowerQuery.includes('туристическ') || lowerQuery.includes('интересные места')) return 'tourist_attraction';
     
     return null; // No specific type, search all
   }
@@ -1557,32 +1617,37 @@ export class GeminiClient {
 
   /**
    * Map query to Google Places types (New API format)
+   * NO REGEX - uses simple string matching
    */
   private inferPlaceTypes(query: string): string[] {
     const lowerQuery = query.toLowerCase();
     const types: string[] = [];
     
     // Food & Drinks
-    if (/кафе|coffee|кофе/.test(lowerQuery)) types.push('cafe');
-    if (/ресторан|restaurant|поесть|еда/.test(lowerQuery)) types.push('restaurant');
-    if (/бар|pub|паб/.test(lowerQuery)) types.push('bar');
+    if (lowerQuery.includes('кафе') || lowerQuery.includes('coffee') || lowerQuery.includes('кофе')) types.push('cafe');
+    if (lowerQuery.includes('ресторан') || lowerQuery.includes('restaurant') || lowerQuery.includes('поесть') || lowerQuery.includes('еда')) types.push('restaurant');
+    if (lowerQuery.includes('бар') || lowerQuery.includes('pub') || lowerQuery.includes('паб')) types.push('bar');
     
     // Shopping
-    if (/магазин|shop|store/.test(lowerQuery)) types.push('store');
-    if (/супермаркет|supermarket/.test(lowerQuery)) types.push('supermarket');
+    if (lowerQuery.includes('магазин') || lowerQuery.includes('shop') || lowerQuery.includes('store')) types.push('store');
+    if (lowerQuery.includes('супермаркет') || lowerQuery.includes('supermarket')) types.push('supermarket');
     
     // Health
-    if (/аптек|pharmacy/.test(lowerQuery)) types.push('pharmacy');
-    if (/больниц|hospital/.test(lowerQuery)) types.push('hospital');
+    if (lowerQuery.includes('аптек') || lowerQuery.includes('pharmacy')) types.push('pharmacy');
+    if (lowerQuery.includes('больниц') || lowerQuery.includes('hospital')) types.push('hospital');
     
     // Finance
-    if (/банк|bank|атм|atm|банкомат/.test(lowerQuery)) types.push('atm', 'bank');
+    if (lowerQuery.includes('банк') || lowerQuery.includes('bank') || lowerQuery.includes('атм') || lowerQuery.includes('atm') || lowerQuery.includes('банкомат')) {
+      types.push('atm', 'bank');
+    }
     
     // Entertainment & Tourism
-    if (/парк|park|погулять/.test(lowerQuery)) types.push('park');
-    if (/музей|museum/.test(lowerQuery)) types.push('museum');
-    if (/кино|cinema|movie/.test(lowerQuery)) types.push('movie_theater');
-    if (/маршрут|что посмотреть|достопримечательност|tourist|туристическ/.test(lowerQuery)) {
+    if (lowerQuery.includes('парк') || lowerQuery.includes('park') || lowerQuery.includes('погулять')) types.push('park');
+    if (lowerQuery.includes('музей') || lowerQuery.includes('museum')) types.push('museum');
+    if (lowerQuery.includes('кино') || lowerQuery.includes('cinema') || lowerQuery.includes('movie')) types.push('movie_theater');
+    if (lowerQuery.includes('маршрут') || lowerQuery.includes('что посмотреть') || 
+        lowerQuery.includes('достопримечательност') || lowerQuery.includes('tourist') || 
+        lowerQuery.includes('туристическ')) {
       types.push('tourist_attraction');
     }
     

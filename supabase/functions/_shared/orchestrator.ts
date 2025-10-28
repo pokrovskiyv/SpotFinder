@@ -17,9 +17,9 @@ import {
   createRouteButton,
   createMultiPlaceButtons,
 } from './telegram-formatter.ts';
-import { TelegramUpdate, PlaceResult, Location, QuotaExceededError, DBSession } from './types.ts';
+import { TelegramUpdate, PlaceResult, Location, DBSession, QuotaExceededError } from './types.ts';
 import { MESSAGES, DONATE_AMOUNTS } from './constants.ts';
-import { isFollowUpQuestion, extractOrdinal, extractMultipleOrdinals, extractCityFromQuery, isRouteRequest, extractPlaceIndices, buildMultiStopRouteUrl, isMultiPlaceRequest, extractPlaceCount, deduplicatePlaces, isPlaceShown } from './utils.ts';
+import { isFollowUpQuestion, extractOrdinal, extractMultipleOrdinals, detectSearchType, isRouteRequest, extractPlaceIndices, buildMultiStopRouteUrl, isMultiPlaceRequest, extractPlaceCount, deduplicatePlaces, isPlaceShown } from './utils.ts';
 import { ContextHandler } from './context-handler.ts';
 import { extractFiltersFromQuery } from './filter-extractor.ts';
 import { sortAndFilterPlaces } from './places-sorter.ts';
@@ -207,49 +207,17 @@ export class Orchestrator {
 
   /**
    * Handle text query (main search flow)
+   * NO GEMINI GROUNDING - Direct Places API search
    */
   private async handleTextQuery(message: any): Promise<void> {
     const userId = message.from.id;
     const chatId = message.chat.id;
     const query = message.text;
 
-    // Check if user has valid location (needed for fallback if city geocoding fails)
+    // Check if user has valid location
     const userLocation = await this.sessionManager.getValidLocation(userId);
     
-    // Try to extract city from query
-    const cityName = extractCityFromQuery(query);
-    let searchLocation = userLocation;
-    let cityGeocoded = false;
-
-    if (cityName) {
-      console.log(`City detected in query: "${cityName}"`);
-      
-      // Try to geocode the city
-      const cityLocation = await this.geminiClient.geocodeCity(cityName, userId);
-      
-      if (cityLocation) {
-        searchLocation = cityLocation;
-        cityGeocoded = true;
-        console.log(`Using geocoded location for "${cityName}": ${cityLocation.lat}, ${cityLocation.lon}`);
-      } else {
-        console.warn(`Failed to geocode city "${cityName}"`);
-        
-        // If user has no location, ask them to share it
-        if (!userLocation) {
-          await this.telegramClient.sendMessage({
-            chatId,
-            text: `Не могу найти город "${cityName}". Пожалуйста, поделись геолокацией, чтобы я мог помочь.`,
-            replyMarkup: this.telegramClient.createLocationButton('📍 Поделиться геолокацией'),
-          });
-          return;
-        }
-        // Otherwise use user location as fallback
-        console.log(`Using user location as fallback for failed city geocoding`);
-      }
-    }
-
-    // If no user location at all (needed as fallback), request it
-    if (!searchLocation) {
+    if (!userLocation) {
       await this.telegramClient.sendMessage({
         chatId,
         text: MESSAGES.LOCATION_REQUEST,
@@ -265,7 +233,7 @@ export class Orchestrator {
     const isRoute = isRouteRequest(query);
     
     if (isRoute) {
-      await this.handleRouteRequest(userId, chatId, query, searchLocation!);
+      await this.handleRouteRequest(userId, chatId, query, userLocation);
       return;
     }
 
@@ -273,24 +241,17 @@ export class Orchestrator {
     const isFollowUp = isFollowUpQuestion(query);
     
     if (isFollowUp) {
-      await this.handleFollowUpQuery(userId, chatId, query, searchLocation!);
+      await this.handleFollowUpQuery(userId, chatId, query, userLocation);
       return;
     }
 
-    // Send confirmation message if searching in a different city
-    if (cityGeocoded && cityName) {
-      await this.telegramClient.sendMessage({
-        chatId,
-        text: `🔍 Ищу в городе ${cityName}...`,
-      });
-    }
-
-    // Regular search flow
-    await this.handleSearchQuery(userId, chatId, query, searchLocation);
+    // Regular search flow - NO GEMINI, direct Places API
+    await this.handleSearchQuery(userId, chatId, query, userLocation);
   }
 
   /**
    * Handle regular search query
+   * NO GEMINI GROUNDING - Direct NEW Places API search
    */
   private async handleSearchQuery(
     userId: number,
@@ -299,152 +260,60 @@ export class Orchestrator {
     location: Location
   ): Promise<void> {
     try {
-      // No preprocessing - let Gemini AI handle intent recognition through improved prompts
-      console.log(`🔍 Processing query: "${query}"`);
+      console.log(`🔍 Processing query: "${query}" (NO GEMINI - Direct Places API)`);
 
-      // Extract filters from user query
+      // Detect search type (nearby, specific_place, general)
+      const searchType = detectSearchType(query);
+      console.log(`Detected search type: ${searchType}`);
+
+      // Extract filters from user query (optional - can use Gemini for this only)
       const filters = await extractFiltersFromQuery(query, this.geminiClient['apiKey']);
       console.log('Extracted filters:', filters);
 
-      // Get list of shown places from session (resets when location updates)
+      // Get list of shown places from session
       const shownPlaceIds = await this.sessionManager.getShownPlaceIds(userId);
       const lastResults = await this.sessionManager.getLastResults(userId) || [];
       console.log(`Excluding ${shownPlaceIds.length} previously shown places from session`);
-
-      // Get user preferences for context
-      const preferences = await this.userManager.getUserPreferences(userId);
 
       // Check if user wants multiple places
       const wantsMultiplePlaces = isMultiPlaceRequest(query);
       const requestedCount = extractPlaceCount(query);
 
-      // Get Gemini's response with Maps Grounding
-      // Gemini will understand intent through improved system prompts
-      let geminiResponse;
-      try {
-        geminiResponse = await this.geminiClient.search({
-          query,
-          location,
-          userId,
-          context: preferences ? { user_preferences: preferences } : undefined,
-          isRouteRequest: wantsMultiplePlaces, // Hint to Gemini to find multiple places
-          filters, // Pass extracted filters
-          excludePlaceIds: shownPlaceIds, // Exclude already shown places
-        });
-      } catch (error) {
-        if (error instanceof QuotaExceededError) {
-          await this.telegramClient.sendMessage({
-            chatId,
-            text: error.cacheAvailable 
-              ? MESSAGES.QUOTA_EXCEEDED_WITH_CACHE 
-              : MESSAGES.QUOTA_EXCEEDED_NO_CACHE,
-          });
-          return;
-        }
-        throw error;
-      }
-
-      // Check if Gemini extracted a city from the query
-      let searchLocation = location;
-
-      if (geminiResponse.extractedCity) {
-        console.log(`Gemini detected city in query: "${geminiResponse.extractedCity}"`);
-        
-        const cityLocation = await this.geminiClient.geocodeCity(geminiResponse.extractedCity, userId);
-        
-        if (cityLocation) {
-          searchLocation = cityLocation;
-          console.log(`Using geocoded location for "${geminiResponse.extractedCity}": ${cityLocation.lat}, ${cityLocation.lon}`);
-          
-          // Send confirmation message
-          await this.telegramClient.sendMessage({
-            chatId,
-            text: `🔍 Ищу в городе ${geminiResponse.extractedCity}...`,
-          });
-        } else {
-          console.warn(`Failed to geocode city "${geminiResponse.extractedCity}", using original location`);
-        }
-      }
-
-      // Log search results
-      console.log('Gemini returned places:', geminiResponse.places.length);
-
-      // FALLBACK: If Gemini returned no places, try Google Places API with correct location
-      let places = geminiResponse.places;
-      let usedFallback = false;
-
-      if (places.length === 0) {
-        console.log('Gemini returned 0 places, trying Places API fallback...');
-        
-        const maxResults = wantsMultiplePlaces && requestedCount 
-          ? Math.min(requestedCount, 5)
-          : wantsMultiplePlaces 
-          ? 5 
-          : 3;
-        
-        // Use searchLocation (which may be geocoded city or user location)
-        places = await this.geminiClient.searchNearbyPlaces(searchLocation, query, maxResults);
-        usedFallback = true;
-        
-        if (places.length > 0) {
-          console.log(`Places API fallback successful: found ${places.length} places`);
-        }
-      }
+      // Direct search using NEW Places API (NO GEMINI)
+      const maxResults = wantsMultiplePlaces && requestedCount 
+        ? Math.min(requestedCount * 2, 20) // Get more for filtering
+        : wantsMultiplePlaces 
+        ? 20 
+        : 20;
+      
+      const places = await this.geminiClient.searchPlacesNew(
+        query,
+        location,
+        searchType,
+        maxResults,
+        shownPlaceIds
+      );
+      
+      console.log(`Places API returned ${places.length} places`);
 
       // Log search results with distances for debugging
       console.log('Search results with distances:', places.map(p => 
         `${p.name} - ${p.distance ? p.distance + 'm' : 'unknown distance'}`
       ));
 
-      // Get full place details for all places using hybrid approach
+      // Get full place details for places that need it
       const placesWithDetails = await Promise.all(
         places.map(async (place) => {
-          let validPlaceId = place.place_id;
-          
-          // Check if place_id looks like a valid Google Place ID
-          // Reject fake IDs starting with 'maps_'
-          const isValidPlaceId = validPlaceId && 
-            !validPlaceId.startsWith('maps_') &&
-            (validPlaceId.startsWith('ChIJ') || validPlaceId.match(/^[A-Za-z0-9_-]{20,}$/));
-          
-          // If place_id is not valid, try to resolve it
-          if (!isValidPlaceId) {
-            console.log(`❌ Invalid place_id for "${place.name}", attempting to resolve...`);
+          // NEW Places API already returns complete data, but get details for reviews/photos
+          if (place.place_id && !place.place_id.startsWith('maps_')) {
             try {
-              const resolvedId = await this.geminiClient.resolvePlaceId(
-                place.name,
-                place.address,
-                place.maps_uri
-              );
-              if (resolvedId) {
-                validPlaceId = resolvedId;
-              }
+              const details = await this.geminiClient.getPlaceDetailsNew(place.place_id, false);
+              return { ...place, ...details };
             } catch (error) {
-              console.error(`Failed to resolve place_id for ${place.name}:`, error);
+              console.error(`Failed to get details for ${place.place_id}:`, error);
+              return place;
             }
           }
-          
-          // Get full details if we have valid place_id
-          if (validPlaceId) {
-            try {
-              console.log(`✓ Getting full details for "${place.name}" (${validPlaceId})`);
-              const details = await this.geminiClient.getPlaceDetailsNew(validPlaceId, true);
-              // Merge with Grounding data, preserve maps_uri for fallback
-              return { 
-                ...place, 
-                ...details, 
-                place_id: validPlaceId,
-                maps_uri: place.maps_uri || details.maps_uri 
-              };
-            } catch (error) {
-              console.error(`Failed to get details for ${validPlaceId}:`, error);
-              // Return place with basic info from Grounding
-              return { ...place, place_id: validPlaceId };
-            }
-          }
-          
-          // Fallback: return with basic info from Grounding only
-          console.log(`⚠️ Could not resolve place_id for "${place.name}", showing basic info`);
           return place;
         })
       );
@@ -475,10 +344,12 @@ export class Orchestrator {
           }
         }
         
-        // Fallback: Filter by name patterns if types not available (for Gemini Grounding results)
+        // Fallback: Filter by name patterns if types not available
         if (wantsMultiplePlaces) {
-          const nameMatches = /hotel|хотел|hostel|хостел|гостиниц|inn/i.test(p.name);
-          if (nameMatches) {
+          const lowerName = p.name.toLowerCase();
+          if (lowerName.includes('hotel') || lowerName.includes('хотел') || 
+              lowerName.includes('hostel') || lowerName.includes('хостел') || 
+              lowerName.includes('гостиниц') || lowerName.includes('inn')) {
             console.log(`Filtering out hotel by name pattern: "${p.name}"`);
             return false;
           }
@@ -505,7 +376,7 @@ export class Orchestrator {
       }
 
       // Apply smart sorting and filtering based on extracted filters
-      let sortedPlaces = sortAndFilterPlaces(placesWithCoordinates, filters, searchLocation);
+      let sortedPlaces = sortAndFilterPlaces(placesWithCoordinates, filters, location);
       console.log(`After filtering and sorting: ${sortedPlaces.length} places`);
 
       // Deduplicate places (remove duplicates by place_id and coordinates)
@@ -548,19 +419,18 @@ export class Orchestrator {
       }
       console.log(`Saved ${newPlaceIds.length} places to session history`);
 
-      // Save search context with limited places for routes and gemini response
+      // Save search context
       const searchId = await this.sessionManager.saveSearchContext(
         userId, 
         query, 
         placesToShow, 
-        usedFallback ? undefined : geminiResponse.text
+        undefined // No AI text anymore
       );
 
-      // Format message - use Gemini's AI text only if Gemini found places
-      const introText = usedFallback ? undefined : geminiResponse.text;
+      // Format message - no AI intro text
       const messageText = formatPlacesMessage(
         placesToShow, 
-        introText, 
+        undefined, 
         showMultiple
       );
       
@@ -704,38 +574,12 @@ export class Orchestrator {
       return;
     }
 
-    // General follow-up question - send to Gemini with full context
-    console.log(`General follow-up question, sending to Gemini with context`);
+    // General follow-up question - simple response
+    console.log(`General follow-up question`);
     
-    const session = await this.sessionManager.getSession(userId);
-    
-    let geminiResponse;
-    try {
-      geminiResponse = await this.geminiClient.search({
-        query: `Это уточняющий вопрос о ранее показанных местах.\n\nПредыдущий запрос: "${session?.last_query || 'неизвестно'}"\n\nНовый вопрос: ${query}`,
-        location,
-        userId,
-        context: {
-          last_query: session?.last_query || undefined,
-          last_results: lastResults,
-        },
-      });
-    } catch (error) {
-      if (error instanceof QuotaExceededError) {
-        await this.telegramClient.sendMessage({
-          chatId,
-          text: error.cacheAvailable 
-            ? MESSAGES.QUOTA_EXCEEDED_WITH_CACHE 
-            : MESSAGES.QUOTA_EXCEEDED_NO_CACHE,
-        });
-        return;
-      }
-      throw error;
-    }
-
     await this.telegramClient.sendMessage({
       chatId,
-      text: geminiResponse.text,
+      text: 'Извините, не могу ответить на этот вопрос. Попробуйте спросить конкретно о месте (например, "есть ли парковка?" или "расскажи про первое место") или сделайте новый поиск.',
       parseMode: 'Markdown',
     });
   }
@@ -1346,69 +1190,27 @@ export class Orchestrator {
     location: Location
   ): Promise<void> {
     try {
-      // Get user preferences for context
-      const preferences = await this.userManager.getUserPreferences(userId);
-
-      // Get Gemini's response with route planning flag
-      let geminiResponse;
-      try {
-        geminiResponse = await this.geminiClient.search({
-          query,
-          location,
-          userId,
-          context: preferences ? { user_preferences: preferences } : undefined,
-          isRouteRequest: true,
-        });
-      } catch (error) {
-        if (error instanceof QuotaExceededError) {
-          await this.telegramClient.sendMessage({
-            chatId,
-            text: error.cacheAvailable 
-              ? MESSAGES.QUOTA_EXCEEDED_WITH_CACHE 
-              : MESSAGES.QUOTA_EXCEEDED_NO_CACHE,
-          });
-          return;
-        }
-        throw error;
-      }
+      // Use Places API directly for route planning (NO GEMINI)
+      const searchType = detectSearchType(query);
+      const places = await this.geminiClient.searchPlacesNew(
+        query,
+        location,
+        searchType,
+        20,
+        []
+      );
 
       // Get full place details for all places
       const placesWithDetails = await Promise.all(
-        geminiResponse.places.map(async (place) => {
-          let validPlaceId = place.place_id;
-          
-          const isValidPlaceId = validPlaceId && 
-            (validPlaceId.startsWith('ChIJ') || validPlaceId.match(/^[A-Za-z0-9_-]{20,}$/));
-          
-          if (!isValidPlaceId && place.name) {
+        places.map(async (place) => {
+          if (place.place_id && !place.place_id.startsWith('maps_')) {
             try {
-              const resolvedId = await this.geminiClient.resolvePlaceId(
-                place.name,
-                place.address,
-                place.maps_uri
-              );
-              if (resolvedId) {
-                validPlaceId = resolvedId;
-              }
+              const details = await this.geminiClient.getPlaceDetailsNew(place.place_id, false);
+              return { ...place, ...details };
             } catch (error) {
-              console.error(`Failed to resolve place_id for ${place.name}:`, error);
+              return place;
             }
           }
-          
-          if (validPlaceId) {
-            try {
-              const details = await this.geminiClient.getPlaceDetailsNew(validPlaceId, false);
-              return { 
-                ...place, 
-                ...details, 
-                place_id: validPlaceId,
-                maps_uri: place.maps_uri || details.maps_uri 
-              };
-            } catch (error) {
-              return { ...place, place_id: validPlaceId };
-            }
-          }
-          
           return place;
         })
       );
@@ -1469,11 +1271,11 @@ export class Orchestrator {
         userId, 
         query, 
         placesWithCoordinates, 
-        geminiResponse.text
+        undefined // No AI text
       );
 
       // Show all places numbered
-      const messageText = formatPlacesMessage(placesWithCoordinates, geminiResponse.text, true);
+      const messageText = formatPlacesMessage(placesWithCoordinates, undefined, true);
       const userLocation = await this.sessionManager.getValidLocation(userId);
       
       await this.telegramClient.sendMessage({
