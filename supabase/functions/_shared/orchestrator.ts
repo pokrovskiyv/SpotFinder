@@ -307,10 +307,32 @@ export class Orchestrator {
         isRouteRequest: wantsMultiplePlaces, // Hint to Gemini to find multiple places
       });
 
+      // Check if Gemini extracted a city from the query
+      let searchLocation = location;
+
+      if (geminiResponse.extractedCity) {
+        console.log(`Gemini detected city in query: "${geminiResponse.extractedCity}"`);
+        
+        const cityLocation = await this.geminiClient.geocodeCity(geminiResponse.extractedCity);
+        
+        if (cityLocation) {
+          searchLocation = cityLocation;
+          console.log(`Using geocoded location for "${geminiResponse.extractedCity}": ${cityLocation.lat}, ${cityLocation.lon}`);
+          
+          // Send confirmation message
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: `🔍 Ищу в городе ${geminiResponse.extractedCity}...`,
+          });
+        } else {
+          console.warn(`Failed to geocode city "${geminiResponse.extractedCity}", using original location`);
+        }
+      }
+
       // Log search results
       console.log('Gemini returned places:', geminiResponse.places.length);
 
-      // FALLBACK: If Gemini returned no places, try Google Places API
+      // FALLBACK: If Gemini returned no places, try Google Places API with correct location
       let places = geminiResponse.places;
       let usedFallback = false;
 
@@ -323,7 +345,8 @@ export class Orchestrator {
           ? 5 
           : 3;
         
-        places = await this.geminiClient.searchNearbyPlaces(location, query, maxResults);
+        // Use searchLocation (which may be geocoded city or user location)
+        places = await this.geminiClient.searchNearbyPlaces(searchLocation, query, maxResults);
         usedFallback = true;
         
         if (places.length > 0) {

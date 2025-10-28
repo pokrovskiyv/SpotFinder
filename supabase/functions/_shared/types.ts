@@ -165,6 +165,7 @@ export interface GeminiResponse {
   places: PlaceResult[];
   intent?: string;
   groundingMetadata?: GroundingMetadata;
+  extractedCity?: string | null; // City extracted by Gemini from query
 }
 
 // Google Maps Grounding types

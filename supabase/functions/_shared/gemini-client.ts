@@ -193,8 +193,22 @@ export class GeminiClient {
     try {
       // Parse the JSON response containing text and grounding metadata
       const parsed = JSON.parse(geminiResponseStr);
-      const text = parsed.text;
+      let text = parsed.text;
       const groundingMetadata: GroundingMetadata = parsed.groundingMetadata || {};
+      
+      // Extract city from Gemini's response
+      let extractedCity: string | null = null;
+      const cityMatch = text.match(/^CITY:\s*(.+)$/m);
+      
+      if (cityMatch) {
+        const cityValue = cityMatch[1].trim();
+        extractedCity = cityValue === 'NONE' ? null : cityValue;
+        
+        // Remove CITY line from text
+        text = text.replace(/^CITY:\s*.+\n*/m, '').trim();
+        
+        console.log(`Gemini extracted city: "${extractedCity}"`);
+      }
       
       // Extract places from grounding chunks
       const places: PlaceResult[] = [];
@@ -247,6 +261,7 @@ export class GeminiClient {
         places: topPlaces,
         intent: this.extractIntent(text),
         groundingMetadata,
+        extractedCity,
       };
     } catch (error) {
       console.error('Failed to parse Gemini response:', error);
@@ -255,6 +270,7 @@ export class GeminiClient {
         text: geminiResponseStr,
         places: [],
         intent: this.extractIntent(geminiResponseStr),
+        extractedCity: null,
       };
     }
   }
