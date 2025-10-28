@@ -875,5 +875,119 @@ export class GeminiClient {
   private looksLikeRussianCity(cityName: string): boolean {
     return /[а-яА-ЯёЁ]/.test(cityName);
   }
+
+  /**
+   * Fallback search using Google Places API Nearby Search
+   * Used when Gemini doesn't return any places
+   */
+  async searchNearbyPlaces(
+    location: Location,
+    query: string,
+    maxResults: number = 5
+  ): Promise<PlaceResult[]> {
+    try {
+      // Determine place type from query
+      const type = this.inferPlaceType(query);
+      const radius = 5000; // 5km radius
+      
+      const url = `${MAPS_API_BASE}/place/nearbysearch/json?` +
+        `location=${location.lat},${location.lon}` +
+        `&radius=${radius}` +
+        (type ? `&type=${type}` : '') +
+        `&key=${this.mapsApiKey}` +
+        `&language=ru`;
+      
+      console.log(`Fallback to Places API: type=${type}, radius=${radius}m`);
+      
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Places API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.status !== 'OK' || !data.results || data.results.length === 0) {
+        console.log(`Places API returned no results: ${data.status}`);
+        return [];
+      }
+      
+      // Convert to PlaceResult format
+      const places: PlaceResult[] = data.results.slice(0, maxResults).map((result: any) => ({
+        place_id: result.place_id,
+        name: result.name,
+        address: result.vicinity,
+        rating: result.rating,
+        is_open: result.opening_hours?.open_now,
+        geometry: {
+          location: {
+            lat: result.geometry.location.lat,
+            lng: result.geometry.location.lng,
+          },
+        },
+        distance: this.calculateDistanceInternal(location, {
+          lat: result.geometry.location.lat,
+          lon: result.geometry.location.lng,
+        }),
+      }));
+      
+      console.log(`Places API found ${places.length} places`);
+      return places;
+      
+    } catch (error) {
+      console.error('Places API fallback failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Infer Google Places type from user query
+   */
+  private inferPlaceType(query: string): string | null {
+    const lowerQuery = query.toLowerCase();
+    
+    // Food & Drinks
+    if (/кафе|coffee|кофе/.test(lowerQuery)) return 'cafe';
+    if (/ресторан|restaurant|поесть|еда/.test(lowerQuery)) return 'restaurant';
+    if (/бар|pub|паб/.test(lowerQuery)) return 'bar';
+    
+    // Shopping
+    if (/магазин|shop|store/.test(lowerQuery)) return 'store';
+    if (/супермаркет|supermarket/.test(lowerQuery)) return 'supermarket';
+    
+    // Health
+    if (/аптек|pharmacy/.test(lowerQuery)) return 'pharmacy';
+    if (/больниц|hospital/.test(lowerQuery)) return 'hospital';
+    
+    // Finance
+    if (/банк|bank|атм|atm|банкомат/.test(lowerQuery)) return 'bank';
+    
+    // Entertainment
+    if (/парк|park|погулять/.test(lowerQuery)) return 'park';
+    if (/музей|museum/.test(lowerQuery)) return 'museum';
+    if (/кино|cinema|movie/.test(lowerQuery)) return 'movie_theater';
+    
+    // Generic
+    if (/достопримечательност|tourist|туристическ/.test(lowerQuery)) return 'tourist_attraction';
+    
+    return null; // No specific type, search all
+  }
+
+  /**
+   * Calculate distance between two coordinates using Haversine formula
+   */
+  private calculateDistanceInternal(point1: Location, point2: Location): number {
+    const R = 6371000; // Earth's radius in meters
+    const φ1 = (point1.lat * Math.PI) / 180;
+    const φ2 = (point2.lat * Math.PI) / 180;
+    const Δφ = ((point2.lat - point1.lat) * Math.PI) / 180;
+    const Δλ = ((point2.lon - point1.lon) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return Math.round(R * c);
+  }
 }
 

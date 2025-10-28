@@ -307,14 +307,38 @@ export class Orchestrator {
         isRouteRequest: wantsMultiplePlaces, // Hint to Gemini to find multiple places
       });
 
+      // Log search results
+      console.log('Gemini returned places:', geminiResponse.places.length);
+
+      // FALLBACK: If Gemini returned no places, try Google Places API
+      let places = geminiResponse.places;
+      let usedFallback = false;
+
+      if (places.length === 0) {
+        console.log('Gemini returned 0 places, trying Places API fallback...');
+        
+        const maxResults = wantsMultiplePlaces && requestedCount 
+          ? Math.min(requestedCount, 5)
+          : wantsMultiplePlaces 
+          ? 5 
+          : 3;
+        
+        places = await this.geminiClient.searchNearbyPlaces(location, query, maxResults);
+        usedFallback = true;
+        
+        if (places.length > 0) {
+          console.log(`Places API fallback successful: found ${places.length} places`);
+        }
+      }
+
       // Log search results with distances for debugging
-      console.log('Search results with distances:', geminiResponse.places.map(p => 
+      console.log('Search results with distances:', places.map(p => 
         `${p.name} - ${p.distance ? p.distance + 'm' : 'unknown distance'}`
       ));
 
       // Get full place details for all places using hybrid approach
       const placesWithDetails = await Promise.all(
-        geminiResponse.places.map(async (place) => {
+        places.map(async (place) => {
           let validPlaceId = place.place_id;
           
           // Check if place_id looks like a valid Google Place ID
@@ -387,10 +411,11 @@ export class Orchestrator {
       // Save search context with limited places for routes
       await this.sessionManager.saveSearchContext(userId, query, placesToShow);
 
-      // Format message
+      // Format message - use Gemini's AI text only if Gemini found places
+      const introText = usedFallback ? undefined : geminiResponse.text;
       const messageText = formatPlacesMessage(
         placesToShow, 
-        geminiResponse.text, 
+        introText, 
         showMultiple
       );
       
