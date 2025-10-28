@@ -134,7 +134,7 @@ export class GeminiClient {
         topP: 0.95,
         maxOutputTokens: 1024,
       },
-      // Enable Google Maps grounding (officially supported in gemini-1.5-flash)
+      // Enable Google Maps grounding (supported in gemini-2.0-flash-exp)
       tools: [{ googleMaps: {} }],
       // Provide user location context for better results
       toolConfig: {
