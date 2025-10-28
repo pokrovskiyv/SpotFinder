@@ -1192,11 +1192,17 @@ export class GeminiClient {
       }
       
       // Fallback to NEW Nearby Search if text search returns nothing
-      const nearbyResults = await this.searchNearbyNew(query, location, radius);
-      
-      if (nearbyResults.length > 0) {
-        console.log(`NEW Nearby Search found ${nearbyResults.length} places`);
-        return nearbyResults.slice(0, maxResults);
+      // Only try Nearby Search if we have place types (it requires at least one type)
+      try {
+        const nearbyResults = await this.searchNearbyNew(query, location, radius);
+        
+        if (nearbyResults.length > 0) {
+          console.log(`NEW Nearby Search found ${nearbyResults.length} places`);
+          return nearbyResults.slice(0, maxResults);
+        }
+      } catch (nearbyError) {
+        console.log('NEW Nearby Search not available (no types found or error):', nearbyError);
+        // Continue with empty results - Text Search already returned nothing
       }
       
       console.log(`NEW Places API returned no results`);
@@ -1390,6 +1396,12 @@ export class GeminiClient {
     const url = `${NEW_PLACES_API_BASE}/places:searchNearby`;
     
     const types = this.inferPlaceTypes(query);
+    
+    // Nearby Search requires at least one type - if no types found, throw error to use Text Search instead
+    if (types.length === 0) {
+      throw new Error('No place types found for Nearby Search - use Text Search instead');
+    }
+    
     const payload: any = {
       maxResultCount: 20,
       locationRestriction: {
@@ -1401,13 +1413,9 @@ export class GeminiClient {
           radius: radius,
         },
       },
+      includedTypes: types, // Always include types since we checked they exist
       languageCode: 'ru',
     };
-    
-    // Only include types if we have them
-    if (types.length > 0) {
-      payload.includedTypes = types;
-    }
     
     // Log payload for debugging
     console.log('searchNearbyNew payload:', JSON.stringify(payload, null, 2));
