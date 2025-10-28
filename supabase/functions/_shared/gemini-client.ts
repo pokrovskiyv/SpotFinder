@@ -419,18 +419,10 @@ export class GeminiClient {
         // Results already have distance calculated in transformNewPlaceToOld
         allResults = [...allResults, ...textResults];
         
-        // Deduplicate before filtering
-        allResults = deduplicatePlaces(allResults);
-        
-        // Filter strictly by MAX_SEARCH_RADIUS
-        const filtered = filterAndSort(allResults, location, MAX_SEARCH_RADIUS);
-        
-        // Exclude already shown places
-        const notShown = filtered.filter(p => p.place_id && !excludePlaceIds.includes(p.place_id));
-        
-        if (notShown.length >= maxResults) {
-          console.log(`Found ${notShown.length} places with NEW Text Search at radius ${radius}m`);
-          return notShown.slice(0, maxResults);
+        // Проверяем, достаточно ли результатов для раннего выхода
+        if (allResults.length >= maxResults * 1.5) {
+          console.log(`Collected enough candidates (${allResults.length}), stopping search at radius ${radius}m`);
+          break;
         }
       } catch (error) {
         console.log(`NEW Text Search failed for radius ${radius}:`, error);
@@ -448,18 +440,23 @@ export class GeminiClient {
             return { ...place, distance, geometry: place.geometry };
           });
           allResults = [...allResults, ...resultsWithDistance];
+          
+          // Проверяем, достаточно ли результатов для раннего выхода
+          if (allResults.length >= maxResults * 1.5) {
+            console.log(`Collected enough candidates (${allResults.length}), stopping search at radius ${radius}m`);
+            break;
+          }
         } catch (oldError) {
           console.log(`Old Text Search also failed for radius ${radius}:`, oldError);
         }
       }
     }
 
-    // Return what we found, strictly filtered and deduplicated
+    // Окончательная обработка: дедупликация, фильтрация, сортировка
     const deduplicated = deduplicatePlaces(allResults);
     const filtered = filterAndSort(deduplicated, location, MAX_SEARCH_RADIUS);
-    // Exclude already shown places
     const notShown = filtered.filter(p => p.place_id && !excludePlaceIds.includes(p.place_id));
-    console.log(`Returning ${notShown.length} filtered and deduplicated results (excluded ${excludePlaceIds.length} shown places)`);
+    console.log(`Returning ${notShown.length} places from ${allResults.length} total results (excluded ${excludePlaceIds.length} shown places)`);
     return notShown.slice(0, maxResults);
   }
 
@@ -1374,7 +1371,7 @@ export class GeminiClient {
     const payload = {
       textQuery: query,
       maxResultCount: 20,
-      locationBias: {
+      locationRestriction: {
         circle: {
           center: {
             latitude: location.lat,
