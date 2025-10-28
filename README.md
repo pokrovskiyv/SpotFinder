@@ -267,6 +267,136 @@ docs/
 - Ошибки и исключения
 - Производительность запросов
 
+## 💰 Мониторинг API расходов
+
+### Обзор системы
+
+SpotFinder использует комплексную систему контроля расходов API с:
+- **Двухуровневыми лимитами** (глобальные и пользовательские)
+- **Интеллектуальным кэшированием** (3 уровня)
+- **Graceful degradation** (показ кэша при превышении лимитов)
+- **Полной прозрачностью** расходов
+
+### SQL запросы для аналитики
+
+#### 📊 Статистика за сегодня
+```sql
+SELECT 
+  api_provider,
+  api_type,
+  COUNT(*) as total_calls,
+  COUNT(*) FILTER (WHERE from_cache = true) as cached_calls,
+  COUNT(*) FILTER (WHERE from_cache = false) as real_calls,
+  SUM(cost_usd) as total_cost_usd
+FROM api_cost_metrics
+WHERE date = CURRENT_DATE
+GROUP BY api_provider, api_type
+ORDER BY total_cost_usd DESC;
+```
+
+#### 💰 Расходы за последние 7 дней
+```sql
+SELECT 
+  date,
+  COUNT(*) as total_calls,
+  SUM(cost_usd) as daily_cost_usd,
+  COUNT(*) FILTER (WHERE from_cache = true) as cached_calls,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE from_cache = true) / NULLIF(COUNT(*), 0), 2) as cache_hit_rate_percent
+FROM api_cost_metrics
+WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY date
+ORDER BY date DESC;
+```
+
+#### 👥 Топ пользователей по использованию
+```sql
+SELECT 
+  user_id,
+  COUNT(*) as total_requests,
+  COUNT(*) FILTER (WHERE quota_exceeded = true) as quota_exceeded_count,
+  COUNT(*) FILTER (WHERE from_cache = true) as cached_requests,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE from_cache = true) / COUNT(*), 2) as cache_rate
+FROM api_cost_metrics
+WHERE date = CURRENT_DATE
+GROUP BY user_id
+ORDER BY total_requests DESC
+LIMIT 10;
+```
+
+#### 🎯 Эффективность кэширования
+```sql
+SELECT 
+  api_provider,
+  COUNT(*) as total_calls,
+  COUNT(*) FILTER (WHERE from_cache = true) as cache_hits,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE from_cache = true) / COUNT(*), 2) as cache_hit_rate_percent,
+  SUM(cost_usd) FILTER (WHERE from_cache = false) as actual_costs_usd,
+  SUM(cost_usd) as would_be_cost_without_cache
+FROM api_cost_metrics
+WHERE date = CURRENT_DATE
+GROUP BY api_provider;
+```
+
+#### 🚨 Мониторинг лимитов в реальном времени
+```sql
+SELECT 
+  user_id,
+  COUNT(*) FILTER (WHERE from_cache = false AND api_provider = 'gemini') as gemini_calls_today,
+  50 - COUNT(*) FILTER (WHERE from_cache = false AND api_provider = 'gemini') as gemini_remaining,
+  COUNT(*) FILTER (WHERE from_cache = false AND api_provider = 'google_maps') as maps_calls_today,
+  200 - COUNT(*) FILTER (WHERE from_cache = false AND api_provider = 'google_maps') as maps_remaining
+FROM api_cost_metrics
+WHERE date = CURRENT_DATE
+GROUP BY user_id
+HAVING COUNT(*) FILTER (WHERE from_cache = false) > 0
+ORDER BY gemini_calls_today DESC;
+```
+
+#### 📈 Детальная статистика по типам запросов
+```sql
+SELECT 
+  api_provider,
+  api_type,
+  date,
+  COUNT(*) as calls,
+  AVG(cost_usd) as avg_cost,
+  MAX(cost_usd) as max_cost,
+  SUM(cost_usd) as total_cost
+FROM api_cost_metrics
+WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+GROUP BY api_provider, api_type, date
+ORDER BY date DESC, total_cost DESC;
+```
+
+### Настроенные лимиты
+
+**Глобальные (для всего бота):**
+- Gemini API: **1000 запросов/день**
+- Google Maps API: **5000 запросов/день**
+- Максимальная стоимость: **$50/день**
+
+**На пользователя:**
+- Gemini API: **50 запросов/день**
+- Google Maps API: **200 запросов/день**
+
+### Кэширование
+
+| Тип данных | TTL | Таблица |
+|------------|-----|---------|
+| Результаты поиска | 4 часа | `search_results_cache` |
+| Детали мест | 24 часа | `places_cache` |
+| Геокодинг городов | бессрочно | `geocoding_cache` |
+
+### Как это работает
+
+1. **Проверка лимитов** → перед каждым API-вызовом
+2. **Если лимит превышен** → проверяем кэш
+3. **Кэш найден** → возвращаем с предупреждением
+4. **Кэша нет** → показываем "лимит исчерпан"
+5. **Лимиты OK** → сначала проверяем кэш (экономим)
+6. **Нет кэша** → делаем реальный вызов
+7. **Результат** → логируется в `api_cost_metrics` и кэшируется
+
 ## 🧪 Тестирование
 
 ```bash
