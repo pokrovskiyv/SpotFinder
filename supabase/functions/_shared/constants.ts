@@ -20,7 +20,7 @@ export const MAX_MESSAGE_LENGTH = 4096;
 
 // Gemini API constants
 export const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-export const GEMINI_MODEL = 'gemini-2.5-flash-lite'; // Supports Google Maps grounding
+export const GEMINI_MODEL = 'gemini-2.5-flash'; // Supports Google Maps Grounding - better for personalized search
 export const GEMINI_MAX_TOKENS = 2048;
 
 // Google Maps constants

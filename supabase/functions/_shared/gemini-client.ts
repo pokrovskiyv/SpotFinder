@@ -1,10 +1,10 @@
 // Gemini API Client - handles communication with Google Gemini API
 
-import { GeminiRequest, GeminiResponse, Location, PlaceResult, PlaceReview } from './types.ts';
-import { GEMINI_API_BASE, GEMINI_MODEL, DEFAULT_SEARCH_RADIUS, MAX_SEARCH_RADIUS, SEARCH_RADIUS_STEPS, MIN_RESULTS_THRESHOLD } from './constants.ts';
+import { GeminiRequest, GeminiResponse, Location, PlaceResult, PlaceReview, GroundingMetadata, GroundingChunk } from './types.ts';
+import { GEMINI_API_BASE, GEMINI_MODEL, DEFAULT_SEARCH_RADIUS, MAX_SEARCH_RADIUS } from './constants.ts';
 import { getTimeContext } from './utils.ts';
 import { buildContextualPrompt } from './prompts/system-prompts.ts';
-import { calculateDistance, filterAndSort, deduplicatePlaces } from './geo-utils.ts';
+import { calculateDistance } from './geo-utils.ts';
 
 export class GeminiClient {
   private apiKey: string;
@@ -171,7 +171,11 @@ export class GeminiClient {
         throw new Error('No text in Gemini response');
       }
 
-      return text;
+      // Return both text and grounding metadata
+      return JSON.stringify({
+        text,
+        groundingMetadata: data.candidates?.[0]?.groundingMetadata || null,
+      });
     } catch (error) {
       console.error('Gemini API call failed:', error);
       throw error;
@@ -179,18 +183,64 @@ export class GeminiClient {
   }
 
   /**
-   * Parse Gemini response and extract places
+   * Parse Gemini response and extract places from Maps Grounding
    */
-  private parseResponse(geminiText: string, request: GeminiRequest): GeminiResponse {
-    // For now, we'll use a simplified approach
-    // In production, you'd want to call Google Places API separately
-    // based on what Gemini suggests
-    
-    return {
-      text: geminiText,
-      places: [], // Will be populated by searchPlaces method
-      intent: this.extractIntent(geminiText),
-    };
+  private parseResponse(geminiResponseStr: string, request: GeminiRequest): GeminiResponse {
+    try {
+      // Parse the JSON response containing text and grounding metadata
+      const parsed = JSON.parse(geminiResponseStr);
+      const text = parsed.text;
+      const groundingMetadata: GroundingMetadata = parsed.groundingMetadata || {};
+      
+      // Extract places from grounding chunks
+      const places: PlaceResult[] = [];
+      
+      if (groundingMetadata.groundingChunks && groundingMetadata.groundingChunks.length > 0) {
+        for (const chunk of groundingMetadata.groundingChunks) {
+          if (chunk.maps) {
+            // Extract place ID from URI if available
+            // URI format: https://www.google.com/maps/place/?q=place_id:ChIJP3Sa8ziYEmsRUKgyFmh9AQM
+            let placeId = chunk.maps.placeId;
+            if (!placeId && chunk.maps.uri) {
+              const placeIdMatch = chunk.maps.uri.match(/place_id:([^&]+)/);
+              placeId = placeIdMatch ? placeIdMatch[1] : chunk.maps.uri;
+            }
+            
+            if (placeId || chunk.maps.title) {
+              const place: PlaceResult = {
+                place_id: placeId || chunk.maps.title || 'unknown',
+                name: chunk.maps.title || 'Без названия',
+                address: chunk.maps.address,
+                // Distance and geometry will be calculated when we get full details from Places API
+              };
+              
+              places.push(place);
+            }
+          }
+        }
+      }
+      
+      // Sort by confidence score or keep original order from Grounding
+      // (Grounding already provides relevant results in order)
+      
+      // Limit to top 5 places
+      const topPlaces = places.slice(0, 5);
+      
+      return {
+        text,
+        places: topPlaces,
+        intent: this.extractIntent(text),
+        groundingMetadata,
+      };
+    } catch (error) {
+      console.error('Failed to parse Gemini response:', error);
+      // Fallback to old approach
+      return {
+        text: geminiResponseStr,
+        places: [],
+        intent: this.extractIntent(geminiResponseStr),
+      };
+    }
   }
 
   /**

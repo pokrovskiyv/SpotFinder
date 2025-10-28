@@ -162,6 +162,23 @@ export interface GeminiResponse {
   text: string;
   places: PlaceResult[];
   intent?: string;
+  groundingMetadata?: GroundingMetadata;
+}
+
+// Google Maps Grounding types
+export interface GroundingMetadata {
+  groundingChunks?: GroundingChunk[];
+  googleMapsWidgetContextToken?: string;
+}
+
+export interface GroundingChunk {
+  maps?: {
+    title: string;
+    uri: string;
+    placeId?: string;
+    address?: string;
+  };
+  confidenceScore?: number;
 }
 
 // Environment variables

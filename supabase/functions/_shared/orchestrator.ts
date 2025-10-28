@@ -243,25 +243,38 @@ export class Orchestrator {
       // Get user preferences for context
       const preferences = await this.userManager.getUserPreferences(userId);
 
-      // Search for places based on the query
-      const places = await this.geminiClient.searchPlaces(
-        query,
-        location
-      );
-
-      // Log search results with distances for debugging
-      console.log('Search results with distances:', places.map(p => 
-        `${p.name} - ${p.distance ? p.distance + 'm' : 'unknown distance'}`
-      ));
-
-      // Get Gemini's interpretation AFTER we have places
+      // Get Gemini's response with Maps Grounding - this will search places and provide answer
       const geminiResponse = await this.geminiClient.search({
         query,
         location,
         context: preferences ? { user_preferences: preferences } : undefined,
       });
 
-      if (places.length === 0) {
+      // Log search results with distances for debugging
+      console.log('Search results with distances:', geminiResponse.places.map(p => 
+        `${p.name} - ${p.distance ? p.distance + 'm' : 'unknown distance'}`
+      ));
+
+      // Get full place details for all found places
+      const placesWithDetails = await Promise.all(
+        geminiResponse.places.map(async (place) => {
+          if (place.place_id && place.place_id.length > 10) {
+            try {
+              const details = await this.geminiClient.getPlaceDetails(place.place_id, false);
+              return { ...place, ...details, distance: place.distance };
+            } catch (error) {
+              console.error(`Failed to get details for ${place.place_id}:`, error);
+              return place;
+            }
+          }
+          return place;
+        })
+      );
+
+      // Filter out places without proper place_id
+      const validPlaces = placesWithDetails.filter(p => p.place_id && p.place_id.length > 10);
+
+      if (validPlaces.length === 0) {
         await this.telegramClient.sendMessage({
           chatId,
           text: MESSAGES.ERROR_NO_RESULTS,
@@ -270,17 +283,17 @@ export class Orchestrator {
       }
 
       // Save search context
-      await this.sessionManager.saveSearchContext(userId, query, places);
+      await this.sessionManager.saveSearchContext(userId, query, validPlaces);
 
       // Send results
-      const messageText = formatPlacesMessage(places, geminiResponse.text);
+      const messageText = formatPlacesMessage(validPlaces, geminiResponse.text);
       
       await this.telegramClient.sendMessage({
         chatId,
         text: messageText,
         parseMode: 'Markdown',
         replyMarkup: this.telegramClient.createInlineKeyboard(
-          createPlaceButtons(places[0], 0)
+          createPlaceButtons(validPlaces[0], 0)
         ),
       });
 
