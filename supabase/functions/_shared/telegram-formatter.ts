@@ -1,7 +1,7 @@
 // Telegram Response Formatter - formats data for Telegram messages
 
 import { PlaceResult, PlaceReview, Location } from './types.ts';
-import { formatDistance, truncateText, buildMultiStopRouteUrl } from './utils.ts';
+import { formatDistance, truncateText, buildMultiStopRouteUrl, hasValidPlaceId } from './utils.ts';
 import { InlineButton } from './telegram-client.ts';
 import { BUTTONS, MESSAGES } from './constants.ts';
 
@@ -118,16 +118,23 @@ export function createPlaceButtons(
   buttons.push(row1);
 
   // Second row: Directions button (URL button)
-  // Always use coordinates - most reliable method (place_id from Gemini often doesn't work)
-  if (place.geometry?.location) {
+  // For individual places: use place_id if available (shows full place card)
+  if (hasValidPlaceId(place.place_id)) {
+    // Use correct place_id format - shows full place card with reviews, hours, etc.
+    const directionsUrl = `https://www.google.com/maps/place/?q=place_id:${place.place_id}`;
+    buttons.push([{
+      text: BUTTONS.DIRECTIONS,
+      url: directionsUrl,
+    }]);
+  } else if (place.geometry?.location) {
+    // Fallback to coordinates if no valid place_id
     const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.geometry.location.lat},${place.geometry.location.lng}`;
-    
     buttons.push([{
       text: BUTTONS.DIRECTIONS,
       url: directionsUrl,
     }]);
   } else if (place.maps_uri) {
-    // Fallback to Maps URI if no coordinates
+    // Last fallback to Maps URI
     buttons.push([{
       text: BUTTONS.SHOW_ON_MAP,
       url: place.maps_uri,

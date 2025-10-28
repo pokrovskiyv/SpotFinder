@@ -304,6 +304,19 @@ function isValidPlaceId(placeId: string | undefined): boolean {
 }
 
 /**
+ * Check if place_id is valid for use in Google Maps URLs
+ * Rejects fake IDs (starting with 'maps_') and too short IDs
+ * This is an exported version for use in other modules
+ */
+export function hasValidPlaceId(placeId: string | undefined): boolean {
+  if (!placeId) return false;
+  // Reject fake IDs created by our code
+  if (placeId.startsWith('maps_')) return false;
+  // Google Place ID should be at least 20 characters
+  return placeId.length >= 20 && /^[A-Za-z0-9_-]+$/.test(placeId);
+}
+
+/**
  * Build Google Maps URL for multi-stop route
  * NOTE: We build URL manually to avoid URLSearchParams encoding issues with place_id:
  * place_id:ChIJ... must NOT be encoded (: should stay as :, not %3A)
@@ -349,12 +362,22 @@ export function buildMultiStopRouteUrl(
   }
   
   // Last place is the destination
+  // Try place_id first (better for specific venues), fallback to coordinates
   const lastPlace = selectedPlaces[selectedPlaces.length - 1];
   let destination: string;
   
-  if (lastPlace.geometry?.location) {
+  const hasValidPlaceId = lastPlace.place_id && 
+                          lastPlace.place_id.length >= 20 && 
+                          !lastPlace.place_id.startsWith('maps_');
+  
+  if (hasValidPlaceId) {
+    // Use place_id for destination - shows place card when route ends
+    destination = `place_id:${lastPlace.place_id}`;
+    console.log(`  - Destination: ${destination} (place_id for venue card)`);
+  } else if (lastPlace.geometry?.location) {
+    // Fallback to coordinates
     destination = `${lastPlace.geometry.location.lat},${lastPlace.geometry.location.lng}`;
-    console.log(`  - Destination: ${destination} (coordinates)`);
+    console.log(`  - Destination: ${destination} (coordinates - no valid place_id)`);
   } else {
     throw new Error('Невозможно построить маршрут - нет координат для последнего места');
   }
