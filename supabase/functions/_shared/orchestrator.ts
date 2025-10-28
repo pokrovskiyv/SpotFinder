@@ -19,8 +19,11 @@ import {
 } from './telegram-formatter.ts';
 import { TelegramUpdate, PlaceResult, Location, QuotaExceededError } from './types.ts';
 import { MESSAGES, DONATE_AMOUNTS } from './constants.ts';
-import { isFollowUpQuestion, extractOrdinal, extractCityFromQuery, isRouteRequest, extractPlaceIndices, buildMultiStopRouteUrl, isMultiPlaceRequest, extractPlaceCount } from './utils.ts';
+import { isFollowUpQuestion, extractOrdinal, extractMultipleOrdinals, extractCityFromQuery, isRouteRequest, extractPlaceIndices, buildMultiStopRouteUrl, isMultiPlaceRequest, extractPlaceCount } from './utils.ts';
 import { ContextHandler } from './context-handler.ts';
+import { ShownPlacesManager } from './shown-places-manager.ts';
+import { extractFiltersFromQuery } from './filter-extractor.ts';
+import { sortAndFilterPlaces } from './places-sorter.ts';
 
 export class Orchestrator {
   private sessionManager: SessionManager;
@@ -30,6 +33,7 @@ export class Orchestrator {
   private contextHandler: ContextHandler;
   private donationManager: DonationManager;
   private actionTracker: UserActionTracker;
+  private shownPlacesManager: ShownPlacesManager;
 
   constructor(
     supabaseUrl: string,
@@ -57,6 +61,9 @@ export class Orchestrator {
     console.log('Orchestrator: Creating UserActionTracker...');
     this.actionTracker = new UserActionTracker(supabaseUrl, supabaseKey);
     console.log('Orchestrator: UserActionTracker created');
+    console.log('Orchestrator: Creating ShownPlacesManager...');
+    this.shownPlacesManager = new ShownPlacesManager(supabaseUrl, supabaseKey);
+    console.log('Orchestrator: ShownPlacesManager created');
     console.log('Orchestrator: Creating ContextHandler...');
     this.contextHandler = new ContextHandler();
     console.log('Orchestrator: Initialized successfully');
@@ -172,6 +179,11 @@ export class Orchestrator {
       case '/donate':
         console.log('HandleCommand: Processing /donate command');
         await this.handleDonateCommand(message);
+        break;
+
+      case '/clear_history':
+        console.log('HandleCommand: Processing /clear_history command');
+        await this.handleClearHistoryCommand(userId, chatId);
         break;
 
       default:
@@ -300,6 +312,14 @@ export class Orchestrator {
       // No preprocessing - let Gemini AI handle intent recognition through improved prompts
       console.log(`🔍 Processing query: "${query}"`);
 
+      // Extract filters from user query
+      const filters = await extractFiltersFromQuery(query, this.geminiClient['apiKey']);
+      console.log('Extracted filters:', filters);
+
+      // Get list of shown places in the last 7 days to avoid repetition
+      const shownPlaceIds = await this.shownPlacesManager.getShownPlaces(userId, 7);
+      console.log(`Excluding ${shownPlaceIds.length} previously shown places`);
+
       // Get user preferences for context
       const preferences = await this.userManager.getUserPreferences(userId);
 
@@ -317,6 +337,8 @@ export class Orchestrator {
           userId,
           context: preferences ? { user_preferences: preferences } : undefined,
           isRouteRequest: wantsMultiplePlaces, // Hint to Gemini to find multiple places
+          filters, // Pass extracted filters
+          excludePlaceIds: shownPlaceIds, // Exclude already shown places
         });
       } catch (error) {
         if (error instanceof QuotaExceededError) {
@@ -491,16 +513,46 @@ export class Orchestrator {
         return;
       }
 
+      // Apply smart sorting and filtering based on extracted filters
+      const sortedPlaces = sortAndFilterPlaces(placesWithCoordinates, filters, searchLocation);
+      console.log(`After filtering and sorting: ${sortedPlaces.length} places`);
+
+      if (sortedPlaces.length === 0) {
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: '😞 К сожалению, не нашёл мест, соответствующих вашим критериям. Попробуйте изменить запрос.',
+        });
+        return;
+      }
+
+      // Save ALL sorted places to cache (up to 20 for pagination)
+      const placesForCache = sortedPlaces.slice(0, 20);
+      await this.sessionManager.savePlacesCache(userId, query, placesForCache);
+      console.log(`Saved ${placesForCache.length} places to cache`);
+
       // Determine if we should show multiple places
-      const showMultiple = wantsMultiplePlaces && placesWithCoordinates.length >= 2;
+      const showMultiple = wantsMultiplePlaces && sortedPlaces.length >= 2;
       
-      // Limit to requested count or max 5
+      // Show first 5 places
       const placesToShow = showMultiple && requestedCount
-        ? placesWithCoordinates.slice(0, Math.min(requestedCount, 5))
+        ? sortedPlaces.slice(0, Math.min(requestedCount, 5))
         : showMultiple
-        ? placesWithCoordinates.slice(0, 5)
-        : placesWithCoordinates;
+        ? sortedPlaces.slice(0, 5)
+        : sortedPlaces.slice(0, 5);
       
+      // Save shown places to history to avoid repetition
+      for (const place of placesToShow) {
+        if (place.place_id) {
+          await this.shownPlacesManager.addShownPlace(
+            userId,
+            place.place_id,
+            place.name,
+            query
+          );
+        }
+      }
+      console.log(`Saved ${placesToShow.length} places to shown history`);
+
       // Save search context with limited places for routes and gemini response
       const searchId = await this.sessionManager.saveSearchContext(
         userId, 
@@ -520,7 +572,7 @@ export class Orchestrator {
       // Choose buttons based on number of places
       const buttons = showMultiple && placesToShow.length >= 2
         ? createMultiPlaceButtons(placesToShow, await this.sessionManager.getValidLocation(userId))
-        : createPlaceButtons(placesWithCoordinates[0], 0);
+        : createPlaceButtons(sortedPlaces[0], 0);
 
       await this.telegramClient.sendMessage({
         chatId,
@@ -560,65 +612,137 @@ export class Orchestrator {
       return;
     }
 
-    // Extract which place user is asking about
-    const placeIndex = extractOrdinal(query);
+    // Determine question type
+    const questionType = this.contextHandler.determineQuestionType(query);
     
-    if (placeIndex && placeIndex <= lastResults.length) {
-      const place = lastResults[placeIndex - 1];
+    console.log(`Follow-up question type: ${questionType}`);
+
+    // Handle comparison questions
+    if (questionType === 'comparison') {
+      const placeIndices = extractMultipleOrdinals(query);
       
-      // Get detailed info about this place (only if we have valid place_id)
-      if (!place.place_id) {
+      let placesToCompare: PlaceResult[];
+      
+      if (placeIndices.length >= 2) {
+        // User specified which places to compare
+        placesToCompare = placeIndices
+          .filter(idx => idx <= lastResults.length)
+          .map(idx => lastResults[idx - 1]);
+        
+        console.log(`Comparing places by indices: ${placeIndices.join(', ')}`);
+      } else if (placeIndices.length === 1) {
+        // User specified one place, compare with the last one
+        const idx = placeIndices[0];
+        if (idx <= lastResults.length) {
+          placesToCompare = [lastResults[idx - 1], lastResults[lastResults.length - 1]];
+          console.log(`Comparing place ${idx} with last place`);
+        } else {
+          placesToCompare = lastResults.slice(0, 2);
+        }
+      } else {
+        // No indices specified, use first two places
+        placesToCompare = lastResults.slice(0, 2);
+        console.log(`Comparing first two places`);
+      }
+      
+      if (placesToCompare.length < 2) {
         await this.telegramClient.sendMessage({
           chatId,
-          text: 'У этого места нет детальной информации. Попробуй выбрать другое место.',
+          text: 'Для сравнения нужно минимум два места из последних результатов.',
         });
         return;
       }
       
-      const details = await this.geminiClient.getPlaceDetails(place.place_id);
+      // Format and send comparison
+      const comparisonText = this.contextHandler.formatComparisonAnswer(placesToCompare, query);
       
       await this.telegramClient.sendMessage({
         chatId,
-        text: this.contextHandler.formatPlaceAnswer(details, query),
+        text: comparisonText,
         parseMode: 'Markdown',
-        replyMarkup: this.telegramClient.createInlineKeyboard(
-          createPlaceButtons(details, placeIndex - 1)
-        ),
       });
-    } else {
-      // General follow-up question, send to Gemini with context
-      const session = await this.sessionManager.getSession(userId);
       
-      let geminiResponse;
-      try {
-        geminiResponse = await this.geminiClient.search({
-          query,
-          location,
-          userId,
-          context: {
-            last_query: session?.last_query || undefined,
-            last_results: lastResults,
-          },
-        });
-      } catch (error) {
-        if (error instanceof QuotaExceededError) {
-          await this.telegramClient.sendMessage({
-            chatId,
-            text: error.cacheAvailable 
-              ? MESSAGES.QUOTA_EXCEEDED_WITH_CACHE 
-              : MESSAGES.QUOTA_EXCEEDED_NO_CACHE,
-          });
-          return;
-        }
-        throw error;
-      }
-
-      await this.telegramClient.sendMessage({
-        chatId,
-        text: geminiResponse.text,
-        parseMode: 'Markdown',
-      });
+      return;
     }
+
+    // Handle detail questions about specific place
+    if (questionType === 'detail') {
+      const placeIndex = extractOrdinal(query);
+      const targetIndex = placeIndex || lastResults.length; // Default to last place
+      
+      if (targetIndex > lastResults.length) {
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: `Место №${targetIndex} не найдено. Всего показано ${lastResults.length} мест.`,
+        });
+        return;
+      }
+      
+      const place = lastResults[targetIndex - 1];
+      
+      console.log(`Detail question about place ${targetIndex}: ${place.name}`);
+      
+      // Get detailed info if we have valid place_id
+      let placeWithDetails = place;
+      if (place.place_id && !place.place_id.startsWith('maps_')) {
+        try {
+          placeWithDetails = await this.geminiClient.getPlaceDetails(place.place_id);
+        } catch (error) {
+          console.error(`Failed to get place details: ${error}`);
+          // Continue with basic info
+        }
+      }
+      
+      const answerText = this.contextHandler.formatPlaceAnswer(placeWithDetails, query);
+      
+      await this.telegramClient.sendMessage({
+        chatId,
+        text: answerText,
+        parseMode: 'Markdown',
+        replyMarkup: place.place_id && !place.place_id.startsWith('maps_')
+          ? this.telegramClient.createInlineKeyboard(
+              createPlaceButtons(placeWithDetails, targetIndex - 1)
+            )
+          : undefined,
+      });
+      
+      return;
+    }
+
+    // General follow-up question - send to Gemini with full context
+    console.log(`General follow-up question, sending to Gemini with context`);
+    
+    const session = await this.sessionManager.getSession(userId);
+    
+    let geminiResponse;
+    try {
+      geminiResponse = await this.geminiClient.search({
+        query: `Это уточняющий вопрос о ранее показанных местах.\n\nПредыдущий запрос: "${session?.last_query || 'неизвестно'}"\n\nНовый вопрос: ${query}`,
+        location,
+        userId,
+        context: {
+          last_query: session?.last_query || undefined,
+          last_results: lastResults,
+        },
+      });
+    } catch (error) {
+      if (error instanceof QuotaExceededError) {
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: error.cacheAvailable 
+            ? MESSAGES.QUOTA_EXCEEDED_WITH_CACHE 
+            : MESSAGES.QUOTA_EXCEEDED_NO_CACHE,
+        });
+        return;
+      }
+      throw error;
+    }
+
+    await this.telegramClient.sendMessage({
+      chatId,
+      text: geminiResponse.text,
+      parseMode: 'Markdown',
+    });
   }
 
   /**
@@ -762,39 +886,156 @@ export class Orchestrator {
         });
       }
     } else if (action === 'next') {
-      // Show next place from search results
-      const lastResults = await this.sessionManager.getLastResults(userId);
+      // Try to get next places from cache first
+      const cached = await this.sessionManager.getNextCachedPlaces(userId, 5);
       
-      if (!lastResults || lastResults.length === 0) {
+      if (cached && cached.places.length > 0) {
+        // We have cached places - show them
+        await this.sessionManager.updateCacheIndex(userId, cached.newIndex);
+        
+        // Save shown places to history
+        const session = await this.sessionManager.getSession(userId);
+        for (const place of cached.places) {
+          if (place.place_id) {
+            await this.shownPlacesManager.addShownPlace(
+              userId,
+              place.place_id,
+              place.name,
+              session?.cache_query || ''
+            );
+          }
+        }
+        
+        // Show cached places
+        const messageText = formatPlacesMessage(
+          cached.places,
+          cached.hasMore ? '➡️ Следующие места:' : '➡️ Последние места из кэша:'
+        );
+        
         await this.telegramClient.sendMessage({
           chatId,
-          text: 'Нет сохраненных результатов поиска.',
+          text: messageText,
+          parseMode: 'Markdown',
+          replyMarkup: this.telegramClient.createInlineKeyboard(
+            createPlaceButtons(cached.places[0], 0)
+          ),
         });
-        return;
+        
+      } else {
+        // Cache exhausted - make new search with excluded shown places
+        const session = await this.sessionManager.getSession(userId);
+        const lastQuery = session?.cache_query || session?.last_query;
+        
+        if (!lastQuery) {
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: 'Нет сохранённого запроса. Попробуйте новый поиск.',
+          });
+          return;
+        }
+        
+        const location = await this.sessionManager.getValidLocation(userId);
+        if (!location) {
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: MESSAGES.LOCATION_REQUEST,
+          });
+          return;
+        }
+        
+        await this.telegramClient.sendTyping(chatId);
+        
+        // Get shown places to exclude
+        const shownPlaceIds = await this.shownPlacesManager.getShownPlaces(userId, 7);
+        
+        // New search with excluded places
+        try {
+          const geminiResponse = await this.geminiClient.search({
+            query: lastQuery,
+            location,
+            userId,
+            excludePlaceIds: shownPlaceIds,
+          });
+          
+          if (geminiResponse.places.length === 0) {
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: '😞 К сожалению, больше новых мест не нашёл. Попробуйте изменить запрос или очистить историю командой /clear_history',
+            });
+            return;
+          }
+          
+          // Get full details for places
+          const placesWithDetails = await Promise.all(
+            geminiResponse.places.map(async (place) => {
+              if (place.place_id) {
+                try {
+                  const details = await this.geminiClient.getPlaceDetails(place.place_id, true);
+                  return { ...place, ...details };
+                } catch (error) {
+                  console.error(`Failed to get details for ${place.place_id}:`, error);
+                  return place;
+                }
+              }
+              return place;
+            })
+          );
+          
+          // Filter out places without coordinates
+          const validPlaces = placesWithDetails.filter(p => p.geometry?.location);
+          
+          if (validPlaces.length === 0) {
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: '😞 К сожалению, больше новых мест не нашёл. Попробуйте изменить запрос.',
+            });
+            return;
+          }
+          
+          // Save new cache
+          await this.sessionManager.savePlacesCache(
+            userId,
+            lastQuery,
+            validPlaces
+          );
+          
+          // Show first 5
+          const placesToShow = validPlaces.slice(0, 5);
+          
+          // Save to history
+          for (const place of placesToShow) {
+            if (place.place_id) {
+              await this.shownPlacesManager.addShownPlace(
+                userId,
+                place.place_id,
+                place.name,
+                lastQuery
+              );
+            }
+          }
+          
+          // Send message
+          const messageText = formatPlacesMessage(
+            placesToShow,
+            '🔍 Нашёл ещё места поблизости:'
+          );
+          
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: messageText,
+            parseMode: 'Markdown',
+            replyMarkup: this.telegramClient.createInlineKeyboard(
+              createPlaceButtons(placesToShow[0], 0)
+            ),
+          });
+        } catch (error) {
+          console.error('Error in next search:', error);
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: 'Произошла ошибка при поиске новых мест. Попробуйте позже.',
+          });
+        }
       }
-
-      const nextIndex = (index + 1) % lastResults.length;
-      const nextPlace = lastResults[nextIndex];
-
-      if (!nextPlace) {
-        await this.telegramClient.sendMessage({
-          chatId,
-          text: 'Больше мест не найдено.',
-        });
-        return;
-      }
-
-      // Format and send next place
-      const messageText = formatPlacesMessage([nextPlace], '➡️ Следующее место:');
-      
-      await this.telegramClient.sendMessage({
-        chatId,
-        text: messageText,
-        parseMode: 'Markdown',
-        replyMarkup: this.telegramClient.createInlineKeyboard(
-          createPlaceButtons(nextPlace, nextIndex)
-        ),
-      });
     } else if (action === 'info') {
       // Get detailed info
       const details = await this.geminiClient.getPlaceDetails(placeId);
@@ -891,6 +1132,27 @@ export class Orchestrator {
       text: MESSAGES.DONATE_INFO,
       replyMarkup: this.telegramClient.createInlineKeyboard(createDonateButtons()),
     });
+  }
+
+  /**
+   * Handle /clear_history command - clear shown places history
+   */
+  private async handleClearHistoryCommand(userId: number, chatId: number): Promise<void> {
+    try {
+      await this.shownPlacesManager.clearHistory(userId);
+      await this.sessionManager.clearPlacesCache(userId);
+      
+      await this.telegramClient.sendMessage({
+        chatId,
+        text: '✅ История показанных мест очищена! Теперь вы снова увидите все места при поиске.',
+      });
+    } catch (error) {
+      console.error('Error clearing history:', error);
+      await this.telegramClient.sendMessage({
+        chatId,
+        text: 'Произошла ошибка при очистке истории. Попробуйте позже.',
+      });
+    }
   }
 
   /**

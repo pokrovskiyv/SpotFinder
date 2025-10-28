@@ -76,14 +76,59 @@ export function extractOrdinal(text: string): number | null {
 }
 
 /**
+ * Extract multiple ordinal numbers from text for comparison questions
+ * (e.g., "первый и третий" -> [1, 3], "сравни 2 и 5" -> [2, 5])
+ */
+export function extractMultipleOrdinals(text: string): number[] {
+  const ordinals: Record<string, number> = {
+    'перв': 1,
+    'втор': 2,
+    'трет': 3,
+    'четверт': 4,
+    'пят': 5,
+  };
+
+  const lowerText = text.toLowerCase();
+  const found: number[] = [];
+  
+  // Ищем цифры в тексте
+  const digitMatches = text.match(/\d+/g);
+  if (digitMatches) {
+    found.push(...digitMatches.map(d => parseInt(d)).filter(n => n >= 1 && n <= 5));
+  }
+  
+  // Ищем словесные обозначения
+  for (const [key, value] of Object.entries(ordinals)) {
+    if (lowerText.includes(key) && !found.includes(value)) {
+      found.push(value);
+    }
+  }
+  
+  // Возвращаем уникальные, отсортированные значения
+  return [...new Set(found)].sort((a, b) => a - b);
+}
+
+/**
  * Check if message is a follow-up question
  */
 export function isFollowUpQuestion(text: string): boolean {
   const followUpPatterns = [
-    /\bу\s+(него|нее|них|первого|второго|третьего)\b/i,
+    // Вопросы с указанием на место по номеру
+    /\bу\s+(него|нее|них|первого|второго|третьего|четвертого|пятого)\b/i,
     /\b(первый|второй|третий|четвертый|пятый)\b/i,
-    /\b(этот|тот|там)\b/i,
-    /\b(туда|сюда)\b/i,
+    
+    // Референсы на места
+    /\b(этот|этого|тот|того|там|тут|здесь|туда|сюда)\b/i,
+    
+    // Вопросы о деталях
+    /\b(какие|какая|какое|какой)\b/i,
+    /\b(расскажи|покажи)\s+(подробнее|больше|еще|про|о)\b/i,
+    /\b(есть\s+ли|а\s+есть)\b/i,
+    /\b(а\s+(цены|часы|время|парковка|меню|wi-fi|wifi))/i,
+    
+    // Сравнительные вопросы
+    /\b(чем|что\s+лучше|сравни|отличается|отличие|разница)\b/i,
+    /\b(лучше|хуже|дороже|дешевле|ближе|дальше)\b/i,
   ];
 
   return followUpPatterns.some(pattern => pattern.test(text));

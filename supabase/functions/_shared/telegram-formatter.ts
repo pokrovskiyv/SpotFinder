@@ -31,6 +31,9 @@ export function formatPlacesMessage(
       if (place.rating) {
         parts.push(`⭐ ${place.rating.toFixed(1)}`);
       }
+      if (place.price_level !== undefined) {
+        parts.push(getPriceLevel(place.price_level));
+      }
       if (place.distance) {
         parts.push(formatDistance(place.distance));
       }

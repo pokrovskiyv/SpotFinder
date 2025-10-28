@@ -71,6 +71,9 @@ export interface DBSession {
   conversation_state: ConversationState;
   created_at: string;
   updated_at: string;
+  places_cache: PlaceResult[] | null;
+  cache_query: string | null;
+  cache_index: number;
 }
 
 export type ConversationState = 'default' | 'awaiting_location' | 'awaiting_followup';
@@ -162,6 +165,22 @@ export interface DBPlaceCache {
   cache_expires_at: string;
 }
 
+export interface DBUserShownPlace {
+  id: string;
+  user_id: number;
+  place_id: string;
+  place_name: string;
+  shown_at: string;
+  search_query: string | null;
+}
+
+export interface SearchFilters {
+  minRating?: number;
+  maxPriceLevel?: number;
+  sortBy?: 'rating' | 'price' | 'distance';
+  openNow?: boolean;
+}
+
 export interface DBUserAction {
   action_id: string;
   user_id: number;
@@ -209,6 +228,8 @@ export interface GeminiRequest {
     user_preferences?: Partial<DBUserPreferences>;
   };
   isRouteRequest?: boolean; // Flag for route planning requests
+  filters?: SearchFilters; // Filters extracted from user query
+  excludePlaceIds?: string[]; // Place IDs to exclude from search results
 }
 
 export interface GeminiResponse {
@@ -242,5 +263,14 @@ export interface Environment {
   GOOGLE_MAPS_API_KEY: string;
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
+}
+
+// Contextual dialog types
+export type QuestionType = 'detail' | 'comparison' | 'general';
+
+export interface ContextualQuestion {
+  type: QuestionType;
+  query: string;
+  targetPlaceIndices?: number[]; // Номера мест из последних результатов
 }
 

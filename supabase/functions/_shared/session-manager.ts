@@ -227,5 +227,86 @@ export class SessionManager {
     const location = await this.getValidLocation(userId);
     return location === null;
   }
+
+  /**
+   * Save extended cache of places (20 places instead of 5)
+   */
+  async savePlacesCache(
+    userId: number,
+    query: string,
+    places: PlaceResult[]
+  ): Promise<void> {
+    const { error } = await this.supabase
+      .from('sessions')
+      .update({
+        places_cache: places,
+        cache_query: query,
+        cache_index: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    if (error) {
+      throw new Error(`Failed to save places cache: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get next batch of places from cache
+   */
+  async getNextCachedPlaces(userId: number, count: number = 5): Promise<{
+    places: PlaceResult[];
+    hasMore: boolean;
+    newIndex: number;
+  } | null> {
+    const session = await this.getSession(userId);
+    if (!session?.places_cache) return null;
+
+    const startIndex = session.cache_index;
+    const endIndex = startIndex + count;
+    const places = session.places_cache.slice(startIndex, endIndex);
+
+    return {
+      places,
+      hasMore: endIndex < session.places_cache.length,
+      newIndex: endIndex,
+    };
+  }
+
+  /**
+   * Update cache index
+   */
+  async updateCacheIndex(userId: number, newIndex: number): Promise<void> {
+    const { error } = await this.supabase
+      .from('sessions')
+      .update({
+        cache_index: newIndex,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    if (error) {
+      throw new Error(`Failed to update cache index: ${error.message}`);
+    }
+  }
+
+  /**
+   * Clear places cache
+   */
+  async clearPlacesCache(userId: number): Promise<void> {
+    const { error } = await this.supabase
+      .from('sessions')
+      .update({
+        places_cache: null,
+        cache_query: null,
+        cache_index: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    if (error) {
+      throw new Error(`Failed to clear places cache: ${error.message}`);
+    }
+  }
 }
 

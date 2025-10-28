@@ -391,14 +391,19 @@ export class GeminiClient {
   async searchPlaces(
     query: string,
     location: Location,
-    initialRadius = DEFAULT_SEARCH_RADIUS
+    initialRadius = DEFAULT_SEARCH_RADIUS,
+    maxResults = 20, // Increased from 5 to 20 for caching
+    excludePlaceIds: string[] = [] // Place IDs to exclude from results
   ): Promise<PlaceResult[]> {
     // Try Nearby Search first (strict radius)
     try {
       const nearbyResults = await this.nearbySearch(query, location, initialRadius);
       if (nearbyResults.length >= MIN_RESULTS_THRESHOLD) {
         console.log(`Found ${nearbyResults.length} places with Nearby Search`);
-        return filterAndSort(nearbyResults, location, MAX_SEARCH_RADIUS).slice(0, 5);
+        const filtered = filterAndSort(nearbyResults, location, MAX_SEARCH_RADIUS);
+        // Exclude already shown places
+        const notShown = filtered.filter(p => p.place_id && !excludePlaceIds.includes(p.place_id));
+        return notShown.slice(0, maxResults);
       }
     } catch (error) {
       console.log('Nearby Search failed, falling back to Text Search:', error);
@@ -435,9 +440,12 @@ export class GeminiClient {
         // Filter strictly by MAX_SEARCH_RADIUS
         const filtered = filterAndSort(allResults, location, MAX_SEARCH_RADIUS);
         
-        if (filtered.length >= 5) {
-          console.log(`Found ${filtered.length} places with Text Search at radius ${radius}m`);
-          return filtered.slice(0, 5);
+        // Exclude already shown places
+        const notShown = filtered.filter(p => p.place_id && !excludePlaceIds.includes(p.place_id));
+        
+        if (notShown.length >= maxResults) {
+          console.log(`Found ${notShown.length} places with Text Search at radius ${radius}m`);
+          return notShown.slice(0, maxResults);
         }
       } catch (error) {
         console.log(`Text Search failed for radius ${radius}:`, error);
@@ -447,8 +455,10 @@ export class GeminiClient {
     // Return what we found, strictly filtered and deduplicated
     const deduplicated = deduplicatePlaces(allResults);
     const filtered = filterAndSort(deduplicated, location, MAX_SEARCH_RADIUS);
-    console.log(`Returning ${filtered.length} filtered and deduplicated results`);
-    return filtered.slice(0, 5);
+    // Exclude already shown places
+    const notShown = filtered.filter(p => p.place_id && !excludePlaceIds.includes(p.place_id));
+    console.log(`Returning ${notShown.length} filtered and deduplicated results (excluded ${excludePlaceIds.length} shown places)`);
+    return notShown.slice(0, maxResults);
   }
 
   /**
