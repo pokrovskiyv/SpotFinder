@@ -412,7 +412,7 @@ export class Orchestrator {
         })
       );
 
-      // Filter out cities and keep only actual places
+      // Filter out cities and hotels from results
       const validPlaces = placesWithDetails.filter(p => {
         // Must have name
         if (!p.name || p.name === 'Без названия') return false;
@@ -425,6 +425,24 @@ export class Orchestrator {
           // Exclude if it's ONLY a locality/political entity without specific place type
           if (hasLocalityType && !hasSpecificType) {
             console.log(`Filtering out city: "${p.name}" (types: ${p.types.join(', ')})`);
+            return false;
+          }
+          
+          // Filter out hotels/lodging for route/exploration queries
+          if (wantsMultiplePlaces) {
+            const isLodging = p.types.some(t => ['lodging', 'hotel'].includes(t));
+            if (isLodging) {
+              console.log(`Filtering out hotel from route query: "${p.name}" (types: ${p.types.join(', ')})`);
+              return false;
+            }
+          }
+        }
+        
+        // Fallback: Filter by name patterns if types not available (for Gemini Grounding results)
+        if (wantsMultiplePlaces) {
+          const nameMatches = /hotel|хотел|hostel|хостел|гостиниц|inn/i.test(p.name);
+          if (nameMatches) {
+            console.log(`Filtering out hotel by name pattern: "${p.name}"`);
             return false;
           }
         }
@@ -1060,7 +1078,7 @@ export class Orchestrator {
         })
       );
 
-      // Filter out cities and keep only actual places
+      // Filter out cities and hotels from multi-place route results
       const validPlaces = placesWithDetails.filter(p => {
         // Must have name
         if (!p.name || p.name === 'Без названия') return false;
@@ -1075,6 +1093,20 @@ export class Orchestrator {
             console.log(`Filtering out city from multi-place search: "${p.name}" (types: ${p.types.join(', ')})`);
             return false;
           }
+          
+          // Always filter out hotels/lodging from multi-place route searches
+          const isLodging = p.types.some(t => ['lodging', 'hotel'].includes(t));
+          if (isLodging) {
+            console.log(`Filtering out hotel from multi-place route: "${p.name}" (types: ${p.types.join(', ')})`);
+            return false;
+          }
+        }
+        
+        // Fallback: Filter by name patterns if types not available (for Gemini Grounding results)
+        const nameMatches = /hotel|хотел|hostel|хостел|гостиниц|inn/i.test(p.name);
+        if (nameMatches) {
+          console.log(`Filtering out hotel by name pattern from route: "${p.name}"`);
+          return false;
         }
         
         return true;

@@ -1006,13 +1006,13 @@ export class GeminiClient {
     // Finance
     if (/банк|bank|атм|atm|банкомат/.test(lowerQuery)) return 'bank';
     
-    // Entertainment
+    // Entertainment & Tourism
     if (/парк|park|погулять/.test(lowerQuery)) return 'park';
     if (/музей|museum/.test(lowerQuery)) return 'museum';
     if (/кино|cinema|movie/.test(lowerQuery)) return 'movie_theater';
     
-    // Generic
-    if (/достопримечательност|tourist|туристическ/.test(lowerQuery)) return 'tourist_attraction';
+    // For route/sightseeing queries, prioritize tourist attractions
+    if (/маршрут|что посмотреть|достопримечательност|tourist|туристическ|интересные места/.test(lowerQuery)) return 'tourist_attraction';
     
     return null; // No specific type, search all
   }
