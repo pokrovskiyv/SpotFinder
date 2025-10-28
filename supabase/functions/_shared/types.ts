@@ -81,7 +81,7 @@ export interface Location {
 }
 
 export interface PlaceResult {
-  place_id: string;
+  place_id?: string; // Optional - undefined means use coordinates instead
   name: string;
   address?: string;
   rating?: number;

@@ -292,9 +292,12 @@ export function extractPlaceCount(text: string): number | null {
 /**
  * Validate Google Place ID
  * Place IDs should be at least 20 characters and match the expected pattern
+ * Rejects temporary fake IDs created by our code (starting with 'maps_')
  */
 function isValidPlaceId(placeId: string | undefined): boolean {
   if (!placeId) return false;
+  // Reject temporary fake IDs created by our code
+  if (placeId.startsWith('maps_')) return false;
   // Google Place ID should be at least 20 characters
   // Usually starts with ChIJ and is 23-27 characters long
   return placeId.length >= 20 && /^[A-Za-z0-9_-]+$/.test(placeId);

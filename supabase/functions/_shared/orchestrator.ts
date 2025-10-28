@@ -365,7 +365,9 @@ export class Orchestrator {
           let validPlaceId = place.place_id;
           
           // Check if place_id looks like a valid Google Place ID
+          // Reject fake IDs starting with 'maps_'
           const isValidPlaceId = validPlaceId && 
+            !validPlaceId.startsWith('maps_') &&
             (validPlaceId.startsWith('ChIJ') || validPlaceId.match(/^[A-Za-z0-9_-]{20,}$/));
           
           // If place_id is not valid, try to resolve it
@@ -491,7 +493,15 @@ export class Orchestrator {
     if (placeIndex && placeIndex <= lastResults.length) {
       const place = lastResults[placeIndex - 1];
       
-      // Get detailed info about this place
+      // Get detailed info about this place (only if we have valid place_id)
+      if (!place.place_id) {
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: 'У этого места нет детальной информации. Попробуй выбрать другое место.',
+        });
+        return;
+      }
+      
       const details = await this.geminiClient.getPlaceDetails(place.place_id);
       
       await this.telegramClient.sendMessage({

@@ -224,6 +224,8 @@ export class GeminiClient {
             // Helper function to validate place_id
             const isValidPlaceId = (id: string | undefined): boolean => {
               if (!id) return false;
+              // Reject temporary fake IDs created by our code
+              if (id.startsWith('maps_')) return false;
               // Google Place ID should be at least 20 characters
               // Usually starts with ChIJ and is 23-27 characters long
               return id.length >= 20 && /^[A-Za-z0-9_-]+$/.test(id);
@@ -250,9 +252,10 @@ export class GeminiClient {
             const validPlaceId = isValidPlaceId(placeId) ? placeId : undefined;
             
             // Create place result with Maps URI for fallback
+            // Don't create fake place_id - will use coordinates instead if needed
             if (chunk.maps.title) {
               const place: PlaceResult = {
-                place_id: validPlaceId || `maps_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                place_id: validPlaceId, // undefined if not valid - will use coordinates
                 name: chunk.maps.title,
                 address: chunk.maps.address,
                 // Store Maps URI for navigation fallback
@@ -261,7 +264,8 @@ export class GeminiClient {
               
               // Enhanced logging for debugging
               console.log(`Extracted place: ${place.name}`);
-              console.log(`  - place_id: ${place.place_id} (valid: ${isValidPlaceId(place.place_id)})`);
+              console.log(`  - place_id: ${place.place_id || 'undefined (will use coordinates)'}`);
+              console.log(`  - place_id valid: ${!!validPlaceId}`);
               console.log(`  - Original URI: ${chunk.maps.uri}`);
               console.log(`  - Address: ${place.address || 'N/A'}`);
               

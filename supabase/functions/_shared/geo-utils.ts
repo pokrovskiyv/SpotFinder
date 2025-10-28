@@ -75,6 +75,11 @@ export function deduplicatePlaces(places: PlaceResult[]): PlaceResult[] {
   const seen = new Map<string, PlaceResult>();
   
   for (const place of places) {
+    // Skip places without place_id (can't deduplicate them)
+    if (!place.place_id) {
+      continue;
+    }
+    
     const existing = seen.get(place.place_id);
     
     // Keep the one with smaller distance or first occurrence
