@@ -362,22 +362,14 @@ export function buildMultiStopRouteUrl(
   }
   
   // Last place is the destination
-  // Try place_id first (better for specific venues), fallback to coordinates
+  // Always use coordinates - place_id: format doesn't work reliably in Directions API
   const lastPlace = selectedPlaces[selectedPlaces.length - 1];
   let destination: string;
   
-  const hasValidPlaceId = lastPlace.place_id && 
-                          lastPlace.place_id.length >= 20 && 
-                          !lastPlace.place_id.startsWith('maps_');
-  
-  if (hasValidPlaceId) {
-    // Use place_id for destination - shows place card when route ends
-    destination = `place_id:${lastPlace.place_id}`;
-    console.log(`  - Destination: ${destination} (place_id for venue card)`);
-  } else if (lastPlace.geometry?.location) {
-    // Fallback to coordinates
+  if (lastPlace.geometry?.location) {
+    // Use coordinates for destination - works reliably for all places
     destination = `${lastPlace.geometry.location.lat},${lastPlace.geometry.location.lng}`;
-    console.log(`  - Destination: ${destination} (coordinates - no valid place_id)`);
+    console.log(`  - Destination: ${destination} (coordinates)`);
   } else {
     throw new Error('Невозможно построить маршрут - нет координат для последнего места');
   }
