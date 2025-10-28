@@ -12,10 +12,13 @@ import {
   formatReviewsMessage,
   createDonateButtons,
   createDonateButton,
+  formatRouteMessage,
+  createRouteButton,
+  createMultiPlaceButtons,
 } from './telegram-formatter.ts';
 import { TelegramUpdate, PlaceResult, Location } from './types.ts';
 import { MESSAGES, DONATE_AMOUNTS } from './constants.ts';
-import { isFollowUpQuestion, extractOrdinal } from './utils.ts';
+import { isFollowUpQuestion, extractOrdinal, extractCityFromQuery, isRouteRequest, extractPlaceIndices, buildMultiStopRouteUrl, isMultiPlaceRequest, extractPlaceCount } from './utils.ts';
 import { ContextHandler } from './context-handler.ts';
 
 export class Orchestrator {
@@ -203,10 +206,43 @@ export class Orchestrator {
     const chatId = message.chat.id;
     const query = message.text;
 
-    // Check if user has valid location
-    const location = await this.sessionManager.getValidLocation(userId);
+    // Check if user has valid location (needed for fallback if city geocoding fails)
+    const userLocation = await this.sessionManager.getValidLocation(userId);
     
-    if (!location) {
+    // Try to extract city from query
+    const cityName = extractCityFromQuery(query);
+    let searchLocation = userLocation;
+    let cityGeocoded = false;
+
+    if (cityName) {
+      console.log(`City detected in query: "${cityName}"`);
+      
+      // Try to geocode the city
+      const cityLocation = await this.geminiClient.geocodeCity(cityName);
+      
+      if (cityLocation) {
+        searchLocation = cityLocation;
+        cityGeocoded = true;
+        console.log(`Using geocoded location for "${cityName}": ${cityLocation.lat}, ${cityLocation.lon}`);
+      } else {
+        console.warn(`Failed to geocode city "${cityName}"`);
+        
+        // If user has no location, ask them to share it
+        if (!userLocation) {
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: `Не могу найти город "${cityName}". Пожалуйста, поделись геолокацией, чтобы я мог помочь.`,
+            replyMarkup: this.telegramClient.createLocationButton('📍 Поделиться геолокацией'),
+          });
+          return;
+        }
+        // Otherwise use user location as fallback
+        console.log(`Using user location as fallback for failed city geocoding`);
+      }
+    }
+
+    // If no user location at all (needed as fallback), request it
+    if (!searchLocation) {
       await this.telegramClient.sendMessage({
         chatId,
         text: MESSAGES.LOCATION_REQUEST,
@@ -218,16 +254,32 @@ export class Orchestrator {
     // Send typing indicator
     await this.telegramClient.sendTyping(chatId);
 
+    // Check if this is a route request
+    const isRoute = isRouteRequest(query);
+    
+    if (isRoute) {
+      await this.handleRouteRequest(userId, chatId, query, searchLocation!);
+      return;
+    }
+
     // Check if this is a follow-up question
     const isFollowUp = isFollowUpQuestion(query);
     
     if (isFollowUp) {
-      await this.handleFollowUpQuery(userId, chatId, query, location);
+      await this.handleFollowUpQuery(userId, chatId, query, searchLocation!);
       return;
     }
 
+    // Send confirmation message if searching in a different city
+    if (cityGeocoded && cityName) {
+      await this.telegramClient.sendMessage({
+        chatId,
+        text: `🔍 Ищу в городе ${cityName}...`,
+      });
+    }
+
     // Regular search flow
-    await this.handleSearchQuery(userId, chatId, query, location);
+    await this.handleSearchQuery(userId, chatId, query, searchLocation);
   }
 
   /**
@@ -243,11 +295,16 @@ export class Orchestrator {
       // Get user preferences for context
       const preferences = await this.userManager.getUserPreferences(userId);
 
+      // Check if user wants multiple places
+      const wantsMultiplePlaces = isMultiPlaceRequest(query);
+      const requestedCount = extractPlaceCount(query);
+
       // Get Gemini's response with Maps Grounding - this will search places and provide answer
       const geminiResponse = await this.geminiClient.search({
         query,
         location,
         context: preferences ? { user_preferences: preferences } : undefined,
+        isRouteRequest: wantsMultiplePlaces, // Hint to Gemini to find multiple places
       });
 
       // Log search results with distances for debugging
@@ -317,19 +374,36 @@ export class Orchestrator {
         return;
       }
 
-      // Save search context
-      await this.sessionManager.saveSearchContext(userId, query, validPlaces);
-
-      // Send results
-      const messageText = formatPlacesMessage(validPlaces, geminiResponse.text);
+      // Determine if we should show multiple places
+      const showMultiple = wantsMultiplePlaces && validPlaces.length >= 2;
       
+      // Limit to requested count or max 5
+      const placesToShow = showMultiple && requestedCount
+        ? validPlaces.slice(0, Math.min(requestedCount, 5))
+        : showMultiple
+        ? validPlaces.slice(0, 5)
+        : validPlaces;
+      
+      // Save search context with limited places for routes
+      await this.sessionManager.saveSearchContext(userId, query, placesToShow);
+
+      // Format message
+      const messageText = formatPlacesMessage(
+        placesToShow, 
+        geminiResponse.text, 
+        showMultiple
+      );
+      
+      // Choose buttons based on number of places
+      const buttons = showMultiple && placesToShow.length >= 2
+        ? createMultiPlaceButtons(placesToShow, await this.sessionManager.getValidLocation(userId))
+        : createPlaceButtons(validPlaces[0], 0);
+
       await this.telegramClient.sendMessage({
         chatId,
         text: messageText,
         parseMode: 'Markdown',
-        replyMarkup: this.telegramClient.createInlineKeyboard(
-          createPlaceButtons(validPlaces[0], 0)
-        ),
+        replyMarkup: this.telegramClient.createInlineKeyboard(buttons),
       });
 
     } catch (error) {
@@ -413,8 +487,11 @@ export class Orchestrator {
     await this.telegramClient.answerCallbackQuery(callbackQuery.id);
 
     // Parse callback data
-    const [action, indexStr, placeId] = data.split('_');
-    const index = parseInt(indexStr);
+    const parts = data.split('_');
+    const action = parts[0];
+    const indexStr = parts[1] || '';
+    const placeId = parts.slice(2).join('_'); // In case place_id contains underscores
+    const index = parseInt(indexStr) || 0;
 
     if (action === 'reviews') {
       console.log(`Reviews callback: placeId=${placeId}, index=${index}`);
@@ -591,6 +668,39 @@ export class Orchestrator {
         const amount = parseInt(indexStr);
         await this.sendDonationInvoice(userId, chatId, amount);
       }
+    } else if (action === 'route' || data === 'route_all_0') {
+      // Handle route callback
+      const lastResults = await this.sessionManager.getLastResults(userId);
+      
+      if (!lastResults || lastResults.length < 2) {
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: MESSAGES.ROUTE_ERROR_NOT_ENOUGH,
+        });
+        return;
+      }
+      
+      const userLocation = await this.sessionManager.getValidLocation(userId);
+      
+      try {
+        const routeUrl = buildMultiStopRouteUrl(userLocation, lastResults);
+        const messageText = formatRouteMessage(lastResults);
+        
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: messageText,
+          parseMode: 'Markdown',
+          replyMarkup: this.telegramClient.createInlineKeyboard(
+            createRouteButton(routeUrl)
+          ),
+        });
+      } catch (error) {
+        console.error('Route building error:', error);
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: MESSAGES.ROUTE_ERROR_NOT_ENOUGH,
+        });
+      }
     }
   }
 
@@ -707,6 +817,177 @@ export class Orchestrator {
       await this.telegramClient.sendMessage({
         chatId,
         text: MESSAGES.DONATE_THANK_YOU(payment.total_amount, payment.total_amount),
+      });
+    }
+  }
+
+  /**
+   * Handle route planning request
+   */
+  private async handleRouteRequest(
+    userId: number,
+    chatId: number,
+    query: string,
+    location: Location
+  ): Promise<void> {
+    try {
+      // Check if we have existing results
+      const lastResults = await this.sessionManager.getLastResults(userId);
+      const userLocation = await this.sessionManager.getValidLocation(userId);
+      
+      if (lastResults && lastResults.length >= 2) {
+        // Extract indices if specified
+        const indices = extractPlaceIndices(query);
+        
+        if (indices.length > 0) {
+          // User specified specific places
+          try {
+            const routeUrl = buildMultiStopRouteUrl(userLocation, lastResults, indices);
+            const messageText = formatRouteMessage(lastResults, indices);
+            
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: messageText,
+              parseMode: 'Markdown',
+              replyMarkup: this.telegramClient.createInlineKeyboard(
+                createRouteButton(routeUrl)
+              ),
+            });
+          } catch (error) {
+            console.error('Route building error:', error);
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: MESSAGES.ROUTE_ERROR_NOT_ENOUGH,
+            });
+          }
+        } else {
+          // User wants route through all places
+          try {
+            const routeUrl = buildMultiStopRouteUrl(userLocation, lastResults);
+            const messageText = formatRouteMessage(lastResults);
+            
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: messageText,
+              parseMode: 'Markdown',
+              replyMarkup: this.telegramClient.createInlineKeyboard(
+                createRouteButton(routeUrl)
+              ),
+            });
+          } catch (error) {
+            console.error('Route building error:', error);
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: MESSAGES.ROUTE_ERROR_NOT_ENOUGH,
+            });
+          }
+        }
+      } else {
+        // No context - perform new multi-place search
+        await this.handleMultiPlaceSearch(userId, chatId, query, location);
+      }
+    } catch (error) {
+      console.error('Route request error:', error);
+      await this.telegramClient.sendMessage({
+        chatId,
+        text: MESSAGES.ERROR_GENERIC,
+      });
+    }
+  }
+
+  /**
+   * Handle multi-place search for route planning
+   */
+  private async handleMultiPlaceSearch(
+    userId: number,
+    chatId: number,
+    query: string,
+    location: Location
+  ): Promise<void> {
+    try {
+      // Get user preferences for context
+      const preferences = await this.userManager.getUserPreferences(userId);
+
+      // Get Gemini's response with route planning flag
+      const geminiResponse = await this.geminiClient.search({
+        query,
+        location,
+        context: preferences ? { user_preferences: preferences } : undefined,
+        isRouteRequest: true,
+      });
+
+      // Get full place details for all places
+      const placesWithDetails = await Promise.all(
+        geminiResponse.places.map(async (place) => {
+          let validPlaceId = place.place_id;
+          
+          const isValidPlaceId = validPlaceId && 
+            (validPlaceId.startsWith('ChIJ') || validPlaceId.match(/^[A-Za-z0-9_-]{20,}$/));
+          
+          if (!isValidPlaceId && place.name) {
+            try {
+              const resolvedId = await this.geminiClient.resolvePlaceId(
+                place.name,
+                place.address,
+                place.maps_uri
+              );
+              if (resolvedId) {
+                validPlaceId = resolvedId;
+              }
+            } catch (error) {
+              console.error(`Failed to resolve place_id for ${place.name}:`, error);
+            }
+          }
+          
+          if (validPlaceId) {
+            try {
+              const details = await this.geminiClient.getPlaceDetails(validPlaceId, false);
+              return { 
+                ...place, 
+                ...details, 
+                place_id: validPlaceId,
+                maps_uri: place.maps_uri || details.maps_uri 
+              };
+            } catch (error) {
+              return { ...place, place_id: validPlaceId };
+            }
+          }
+          
+          return place;
+        })
+      );
+
+      const validPlaces = placesWithDetails.filter(p => p.name && p.name !== 'Без названия');
+
+      if (validPlaces.length < 2) {
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: 'Для построения маршрута нужно минимум 2 места. Попробуй уточнить запрос.',
+        });
+        return;
+      }
+
+      // Save search context
+      await this.sessionManager.saveSearchContext(userId, query, validPlaces);
+
+      // Show all places numbered
+      const messageText = formatPlacesMessage(validPlaces, geminiResponse.text, true);
+      const userLocation = await this.sessionManager.getValidLocation(userId);
+      
+      await this.telegramClient.sendMessage({
+        chatId,
+        text: messageText,
+        parseMode: 'Markdown',
+        replyMarkup: this.telegramClient.createInlineKeyboard(
+          createMultiPlaceButtons(validPlaces, userLocation)
+        ),
+      });
+
+    } catch (error) {
+      console.error('Multi-place search error:', error);
+      await this.telegramClient.sendMessage({
+        chatId,
+        text: MESSAGES.ERROR_GENERIC,
       });
     }
   }

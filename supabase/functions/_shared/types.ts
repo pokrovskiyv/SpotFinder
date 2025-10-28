@@ -157,6 +157,7 @@ export interface GeminiRequest {
     last_results?: PlaceResult[];
     user_preferences?: Partial<DBUserPreferences>;
   };
+  isRouteRequest?: boolean; // Flag for route planning requests
 }
 
 export interface GeminiResponse {

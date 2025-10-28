@@ -1,10 +1,10 @@
 // Gemini API Client - handles communication with Google Gemini API
 
 import { GeminiRequest, GeminiResponse, Location, PlaceResult, PlaceReview, GroundingMetadata, GroundingChunk } from './types.ts';
-import { GEMINI_API_BASE, GEMINI_MODEL, DEFAULT_SEARCH_RADIUS, MAX_SEARCH_RADIUS } from './constants.ts';
+import { GEMINI_API_BASE, GEMINI_MODEL, DEFAULT_SEARCH_RADIUS, MAX_SEARCH_RADIUS, MAPS_API_BASE, MIN_RESULTS_THRESHOLD, SEARCH_RADIUS_STEPS } from './constants.ts';
 import { getTimeContext } from './utils.ts';
 import { buildContextualPrompt } from './prompts/system-prompts.ts';
-import { calculateDistance } from './geo-utils.ts';
+import { calculateDistance, filterAndSort, deduplicatePlaces } from './geo-utils.ts';
 
 export class GeminiClient {
   private apiKey: string;
@@ -43,12 +43,16 @@ export class GeminiClient {
     // Check if has conversation context
     const hasContext = !!(context?.last_query && context?.last_results);
 
+    // Check if this is a route request
+    const isRouteRequest = !!(request as any).isRouteRequest || false;
+
     // Build contextual prompt using improved prompt system
     let systemPrompt = buildContextualPrompt(
       query,
       timeContext,
       urgency,
-      hasContext
+      hasContext,
+      isRouteRequest
     );
 
     // Add previous conversation context if available
@@ -799,6 +803,77 @@ export class GeminiClient {
    */
   getPhotoUrl(photoReference: string, maxWidth = 800): string {
     return `https://maps.googleapis.com/maps/api/place/photo?maxwidth=${maxWidth}&photoreference=${photoReference}&key=${this.mapsApiKey}`;
+  }
+
+  /**
+   * Geocode city name to coordinates using Google Maps Geocoding API
+   * Returns location (lat/lon) or null if city not found
+   * Universal approach: works for cities worldwide, not just Russia
+   */
+  async geocodeCity(cityName: string): Promise<Location | null> {
+    try {
+      // Step 1: Try without country restriction first (для международных городов)
+      console.log(`Geocoding city (universal): "${cityName}"`);
+      
+      const universalUrl = `${MAPS_API_BASE}/geocode/json?address=${encodeURIComponent(cityName)}&key=${this.mapsApiKey}&language=ru`;
+      
+      const response1 = await fetch(universalUrl);
+      
+      if (response1.ok) {
+        const data1 = await response1.json();
+        
+        if (data1.status === 'OK' && data1.results && data1.results.length > 0) {
+          // Filter for city/locality results if possible
+          const cityResults = data1.results.filter((r: any) => 
+            r.types.some((t: string) => ['locality', 'administrative_area_level_1', 'political'].includes(t))
+          );
+          
+          const bestResult = cityResults.length > 0 ? cityResults[0] : data1.results[0];
+          const location = bestResult.geometry.location;
+          
+          console.log(`City geocoded successfully (universal): "${cityName}" -> ${location.lat}, ${location.lng}`);
+          return {
+            lat: location.lat,
+            lon: location.lng,
+          };
+        }
+      }
+      
+      // Step 2: If not found, and looks like Russian city, try with "Россия"
+      if (this.looksLikeRussianCity(cityName)) {
+        console.log(`Trying with Russia restriction: "${cityName}"`);
+        const russianQuery = encodeURIComponent(`${cityName}, Россия`);
+        const russianUrl = `${MAPS_API_BASE}/geocode/json?address=${russianQuery}&key=${this.mapsApiKey}&language=ru`;
+        
+        const response2 = await fetch(russianUrl);
+        
+        if (response2.ok) {
+          const data2 = await response2.json();
+          
+          if (data2.status === 'OK' && data2.results && data2.results.length > 0) {
+            const location = data2.results[0].geometry.location;
+            console.log(`City geocoded with Russia: "${cityName}" -> ${location.lat}, ${location.lng}`);
+            return {
+              lat: location.lat,
+              lon: location.lng,
+            };
+          }
+        }
+      }
+      
+      console.warn(`City not found: "${cityName}"`);
+      return null;
+    } catch (error) {
+      console.error(`Geocoding error for "${cityName}":`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Check if city name looks like Russian (uses Cyrillic)
+   */
+  private looksLikeRussianCity(cityName: string): boolean {
+    return /[а-яА-ЯёЁ]/.test(cityName);
   }
 }
 

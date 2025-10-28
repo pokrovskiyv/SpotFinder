@@ -1,22 +1,55 @@
 // Telegram Response Formatter - formats data for Telegram messages
 
-import { PlaceResult, PlaceReview } from './types.ts';
-import { formatDistance, truncateText } from './utils.ts';
+import { PlaceResult, PlaceReview, Location } from './types.ts';
+import { formatDistance, truncateText, buildMultiStopRouteUrl } from './utils.ts';
 import { InlineButton } from './telegram-client.ts';
-import { BUTTONS } from './constants.ts';
+import { BUTTONS, MESSAGES } from './constants.ts';
 
 /**
- * Format place results into a readable message - show only first place
+ * Format place results into a readable message
+ * If multiple places (>=2), shows all of them numbered
+ * Otherwise shows only first place
  */
 export function formatPlacesMessage(
   places: PlaceResult[],
-  introText?: string
+  introText?: string,
+  showMultiple: boolean = false
 ): string {
   if (places.length === 0) {
     return '😞 К сожалению, ничего не нашел рядом. Попробуй изменить запрос.';
   }
 
-  // Show only first place
+  // If showing multiple places (route request or multi-place search)
+  if (showMultiple && places.length >= 2) {
+    const emojiNumbers = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+    let message = introText ? `${introText}\n\n` : `🔍 Нашел ${places.length} мест:\n\n`;
+    
+    places.slice(0, 5).forEach((place, index) => {
+      message += `${emojiNumbers[index]} **${place.name}**\n`;
+      
+      const parts: string[] = [];
+      if (place.rating) {
+        parts.push(`⭐ ${place.rating.toFixed(1)}`);
+      }
+      if (place.distance) {
+        parts.push(formatDistance(place.distance));
+      }
+      if (place.is_open !== undefined) {
+        parts.push(place.is_open ? '✅ Открыто' : '❌ Закрыто');
+      }
+      
+      if (parts.length > 0) {
+        message += parts.join(' • ') + '\n';
+      }
+      
+      message += '\n';
+    });
+    
+    message += '_Можешь спросить подробнее о любом месте или построить маршрут!_';
+    return message.trim();
+  }
+
+  // Show only first place (default behavior)
   const place = places[0];
   let message = introText ? `${introText}\n\n` : '🔍 Вот что я нашел:\n\n';
 
@@ -237,5 +270,92 @@ export function createDonateButton(): InlineButton[][] {
       },
     ],
   ];
+}
+
+/**
+ * Format route message with place names
+ */
+export function formatRouteMessage(
+  places: PlaceResult[],
+  indices?: number[]
+): string {
+  const selectedPlaces = indices 
+    ? indices.map(i => places[i - 1]).filter(Boolean)
+    : places;
+  
+  const count = selectedPlaces.length;
+  
+  let message = MESSAGES.ROUTE_BUILT(count);
+  
+  if (count <= 5) {
+    message += '\n\n📍 Маршрут:';
+    selectedPlaces.forEach((place, index) => {
+      message += `\n${index + 1}. ${place.name}`;
+    });
+  }
+  
+  return message;
+}
+
+/**
+ * Create route button with URL
+ */
+export function createRouteButton(routeUrl: string): InlineButton[][] {
+  return [
+    [
+      {
+        text: BUTTONS.ROUTE_CUSTOM,
+        url: routeUrl,
+      },
+    ],
+  ];
+}
+
+/**
+ * Create buttons for multiple places with route option
+ */
+export function createMultiPlaceButtons(
+  places: PlaceResult[],
+  userLocation: Location | null
+): InlineButton[][] {
+  const buttons: InlineButton[][] = [];
+  
+  // First row: Reviews button for first place
+  if (places.length > 0 && places[0].place_id) {
+    buttons.push([
+      {
+        text: BUTTONS.REVIEWS,
+        callback_data: `reviews_0_${places[0].place_id}`,
+      },
+      {
+        text: BUTTONS.SHOW_MORE,
+        callback_data: `next_0`,
+      },
+    ]);
+  }
+  
+  // Route button if we have 2+ places
+  if (places.length >= 2) {
+    try {
+      const routeUrl = buildMultiStopRouteUrl(userLocation, places);
+      buttons.push([
+        {
+          text: BUTTONS.ROUTE_ALL,
+          url: routeUrl,
+        },
+      ]);
+    } catch (error) {
+      console.error('Failed to build route URL:', error);
+      // If route building fails, show callback button instead
+      buttons.push([
+        {
+          text: BUTTONS.ROUTE_ALL,
+          callback_data: 'route_all_0',
+        },
+      ]);
+    }
+  }
+  
+  return buttons;
 }
 
