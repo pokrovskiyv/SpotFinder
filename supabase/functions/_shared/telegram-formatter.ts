@@ -42,6 +42,11 @@ export function formatPlacesMessage(
     message += `\n📍 ${truncateText(place.address, 100)}`;
   }
 
+  // Show notice if details are incomplete
+  if (!place.rating && !place.address) {
+    message += '\n\n_ℹ️ Детальная информация недоступна, но вы можете посмотреть место на карте_';
+  }
+
   return message.trim();
 }
 

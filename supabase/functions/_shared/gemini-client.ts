@@ -435,6 +435,166 @@ export class GeminiClient {
   }
 
   /**
+   * Extract coordinates from Google Maps URI
+   * Supports formats: 
+   * - https://www.google.com/maps/place/?q=place_id:...
+   * - https://maps.google.com/?q=lat,lng
+   * - https://www.google.com/maps/@lat,lng,zoom
+   */
+  private extractCoordsFromUri(mapsUri: string): Location | null {
+    try {
+      // Format 1: @lat,lng,zoom
+      const coordsMatch1 = mapsUri.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      if (coordsMatch1) {
+        return { lat: parseFloat(coordsMatch1[1]), lon: parseFloat(coordsMatch1[2]) };
+      }
+      
+      // Format 2: ?q=lat,lng
+      const coordsMatch2 = mapsUri.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+      if (coordsMatch2) {
+        return { lat: parseFloat(coordsMatch2[1]), lon: parseFloat(coordsMatch2[2]) };
+      }
+      
+      console.log(`Could not extract coordinates from URI: ${mapsUri}`);
+      return null;
+    } catch (error) {
+      console.error('Error extracting coordinates from URI:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Simplified text search for place_id resolution (single result)
+   */
+  private async textSearchSimple(query: string): Promise<PlaceResult[]> {
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json`;
+    
+    const params = new URLSearchParams({
+      query,
+      language: 'ru',
+      key: this.mapsApiKey,
+    });
+
+    const response = await fetch(`${url}?${params}`);
+    
+    if (!response.ok) {
+      console.error('Text search simple failed:', response.status);
+      return [];
+    }
+
+    const data = await response.json();
+    
+    if (data.status !== 'OK') {
+      console.log('Text search simple returned:', data.status);
+      return [];
+    }
+
+    return (data.results || []).slice(0, 1).map((place: any) => ({
+      place_id: place.place_id,
+      name: place.name,
+      address: place.formatted_address,
+      geometry: place.geometry,
+    }));
+  }
+
+  /**
+   * Simplified nearby search for place_id resolution by name and location
+   */
+  private async nearbySearchSimple(name: string, location: Location): Promise<PlaceResult[]> {
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json`;
+    
+    const params = new URLSearchParams({
+      location: `${location.lat},${location.lon}`,
+      radius: '100', // Very tight radius since we have exact coords
+      keyword: name,
+      language: 'ru',
+      key: this.mapsApiKey,
+    });
+
+    const response = await fetch(`${url}?${params}`);
+    
+    if (!response.ok) {
+      console.error('Nearby search simple failed:', response.status);
+      return [];
+    }
+
+    const data = await response.json();
+    
+    if (data.status !== 'OK') {
+      console.log('Nearby search simple returned:', data.status);
+      return [];
+    }
+
+    return (data.results || []).slice(0, 1).map((place: any) => ({
+      place_id: place.place_id,
+      name: place.name,
+      address: place.formatted_address,
+      geometry: place.geometry,
+    }));
+  }
+
+  /**
+   * Try to resolve valid place_id from Grounding data
+   * Uses Text Search and Nearby Search to find the actual place
+   */
+  async resolvePlaceId(name: string, address?: string, mapsUri?: string): Promise<string | null> {
+    console.log(`Resolving place_id for: "${name}", address: "${address}", uri: "${mapsUri}"`);
+    
+    // 1. Try Text Search by name and address
+    if (name && address) {
+      const query = `${name} ${address}`;
+      console.log(`Trying Text Search with query: "${query}"`);
+      
+      try {
+        const textResults = await this.textSearchSimple(query);
+        if (textResults[0]?.place_id) {
+          console.log(`✓ Found place_id via Text Search: ${textResults[0].place_id}`);
+          return textResults[0].place_id;
+        }
+      } catch (error) {
+        console.error('Text Search failed:', error);
+      }
+    }
+    
+    // 2. Try to extract coordinates from maps_uri and use Nearby Search
+    if (mapsUri) {
+      const coords = this.extractCoordsFromUri(mapsUri);
+      if (coords) {
+        console.log(`Extracted coords from URI: ${coords.lat}, ${coords.lon}`);
+        console.log(`Trying Nearby Search with name: "${name}"`);
+        
+        try {
+          const nearbyResults = await this.nearbySearchSimple(name, coords);
+          if (nearbyResults[0]?.place_id) {
+            console.log(`✓ Found place_id via Nearby Search: ${nearbyResults[0].place_id}`);
+            return nearbyResults[0].place_id;
+          }
+        } catch (error) {
+          console.error('Nearby Search failed:', error);
+        }
+      }
+    }
+    
+    // 3. Last resort: try Text Search with just the name
+    if (name) {
+      console.log(`Last resort: Text Search with name only: "${name}"`);
+      
+      try {
+        const textResults = await this.textSearchSimple(name);
+        if (textResults[0]?.place_id) {
+          console.log(`✓ Found place_id via Text Search (name only): ${textResults[0].place_id}`);
+          return textResults[0].place_id;
+        }
+      } catch (error) {
+        console.error('Text Search (name only) failed:', error);
+      }
+    }
+    
+    console.log(`✗ Could not resolve place_id for "${name}"`);
+    return null;
+  }
+
+  /**
    * Get place details by Place ID
    */
   async getPlaceDetails(placeId: string, includeReviews = false): Promise<PlaceResult> {

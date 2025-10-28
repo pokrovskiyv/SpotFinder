@@ -255,28 +255,53 @@ export class Orchestrator {
         `${p.name} - ${p.distance ? p.distance + 'm' : 'unknown distance'}`
       ));
 
-      // Get full place details for places with valid place_id
+      // Get full place details for all places using hybrid approach
       const placesWithDetails = await Promise.all(
         geminiResponse.places.map(async (place) => {
-          // Check if place_id looks like a valid Google Place ID (starts with ChIJ or has specific format)
-          const isValidPlaceId = place.place_id && 
-            (place.place_id.startsWith('ChIJ') || place.place_id.match(/^[A-Za-z0-9_-]{20,}$/));
+          let validPlaceId = place.place_id;
           
-          if (isValidPlaceId) {
+          // Check if place_id looks like a valid Google Place ID
+          const isValidPlaceId = validPlaceId && 
+            (validPlaceId.startsWith('ChIJ') || validPlaceId.match(/^[A-Za-z0-9_-]{20,}$/));
+          
+          // If place_id is not valid, try to resolve it
+          if (!isValidPlaceId) {
+            console.log(`❌ Invalid place_id for "${place.name}", attempting to resolve...`);
             try {
-              console.log(`Getting details for place_id: ${place.place_id}`);
-              const details = await this.geminiClient.getPlaceDetails(place.place_id, false);
-              // Preserve maps_uri from grounding for fallback
-              return { ...place, ...details, maps_uri: place.maps_uri || details.maps_uri };
+              const resolvedId = await this.geminiClient.resolvePlaceId(
+                place.name,
+                place.address,
+                place.maps_uri
+              );
+              if (resolvedId) {
+                validPlaceId = resolvedId;
+              }
             } catch (error) {
-              console.error(`Failed to get details for ${place.place_id}:`, error);
-              // Return place with basic info from Grounding
-              return place;
+              console.error(`Failed to resolve place_id for ${place.name}:`, error);
             }
           }
           
-          // For places without valid place_id, use what we have from Grounding
-          console.log(`No valid place_id for ${place.name}, using Grounding data`);
+          // Get full details if we have valid place_id
+          if (validPlaceId) {
+            try {
+              console.log(`✓ Getting full details for "${place.name}" (${validPlaceId})`);
+              const details = await this.geminiClient.getPlaceDetails(validPlaceId, true);
+              // Merge with Grounding data, preserve maps_uri for fallback
+              return { 
+                ...place, 
+                ...details, 
+                place_id: validPlaceId,
+                maps_uri: place.maps_uri || details.maps_uri 
+              };
+            } catch (error) {
+              console.error(`Failed to get details for ${validPlaceId}:`, error);
+              // Return place with basic info from Grounding
+              return { ...place, place_id: validPlaceId };
+            }
+          }
+          
+          // Fallback: return with basic info from Grounding only
+          console.log(`⚠️ Could not resolve place_id for "${place.name}", showing basic info`);
           return place;
         })
       );
