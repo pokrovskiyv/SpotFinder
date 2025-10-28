@@ -72,7 +72,7 @@ export class GeminiClient {
     
     try {
       const response = await this.callGeminiAPI(prompt, request.location);
-      const result = this.parseResponse(response, request);
+      const result = await this.parseResponse(response, request);
       
       // 5. Log and cache the result
       if (this.costTracker) {
@@ -114,7 +114,8 @@ export class GeminiClient {
       timeContext,
       urgency,
       hasContext,
-      isRouteRequest
+      isRouteRequest,
+      request.location
     );
 
     // Add previous conversation context if available
@@ -251,7 +252,7 @@ export class GeminiClient {
   /**
    * Parse Gemini response and extract places from Maps Grounding
    */
-  private parseResponse(geminiResponseStr: string, request: GeminiRequest): GeminiResponse {
+  private async parseResponse(geminiResponseStr: string, request: GeminiRequest): Promise<GeminiResponse> {
     try {
       // Parse the JSON response containing text and grounding metadata
       const parsed = JSON.parse(geminiResponseStr);
@@ -337,11 +338,65 @@ export class GeminiClient {
         }
       }
       
-      // Sort by confidence score or keep original order from Grounding
-      // (Grounding already provides relevant results in order)
-      
-      // Limit to top 5 places
-      const topPlaces = places.slice(0, 5);
+      // КРИТИЧНО: Фильтруем места по расстоянию от пользователя
+      // Gemini Grounding может вернуть места из любой точки мира
+      const placesWithDistance = await Promise.all(
+        places.map(async (place) => {
+          if (place.place_id) {
+            try {
+              const details = await this.getPlaceDetails(place.place_id, false);
+              return details;
+            } catch (error) {
+              console.error(`Failed to get details for place ${place.place_id}:`, error);
+              return place;
+            }
+          }
+          
+          // Если нет place_id, пробуем извлечь координаты из maps_uri
+          if (place.maps_uri) {
+            const coords = this.extractCoordsFromUri(place.maps_uri);
+            if (coords) {
+              const distance = calculateDistance(request.location, coords);
+              return { ...place, distance, geometry: { location: { lat: coords.lat, lng: coords.lon } } };
+            }
+          }
+          
+          return place;
+        })
+      );
+
+      // Фильтруем: только места в пределах MAX_SEARCH_RADIUS (5км)
+      const filtered = placesWithDistance.filter(place => {
+        if (place.distance === undefined) {
+          console.warn(`Place "${place.name}" excluded: distance unknown`);
+          return false;
+        }
+        const withinRadius = place.distance <= MAX_SEARCH_RADIUS;
+        if (!withinRadius) {
+          console.log(`Place "${place.name}" excluded: ${(place.distance / 1000).toFixed(1)}km > ${MAX_SEARCH_RADIUS / 1000}km`);
+        }
+        return withinRadius;
+      });
+
+      // Сортируем по расстоянию (ближе первыми)
+      const sorted = filtered.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+
+      // Применяем пользовательские фильтры
+      let finalPlaces = sorted;
+      if (request.filters) {
+        const { sortAndFilterPlaces } = await import('./places-sorter.ts');
+        finalPlaces = sortAndFilterPlaces(sorted, request.filters, request.location);
+      }
+
+      // Исключаем уже показанные места
+      if (request.excludePlaceIds && request.excludePlaceIds.length > 0) {
+        finalPlaces = finalPlaces.filter(p => p.place_id && !request.excludePlaceIds!.includes(p.place_id));
+        console.log(`Excluded ${request.excludePlaceIds.length} previously shown places`);
+      }
+
+      const topPlaces = finalPlaces.slice(0, 5);
+
+      console.log(`Gemini Grounding: ${places.length} raw → ${filtered.length} within ${MAX_SEARCH_RADIUS/1000}km → ${topPlaces.length} final`);
       
       return {
         text,
