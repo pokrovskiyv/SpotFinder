@@ -1,25 +1,28 @@
 // Gemini API Client - handles communication with Google Gemini API
 
-import { GeminiRequest, GeminiResponse, Location, PlaceResult, PlaceReview, GroundingMetadata, GroundingChunk } from './types.ts';
+import { GeminiRequest, GeminiResponse, Location, PlaceResult, PlaceReview, GroundingMetadata, GroundingChunk, QuotaExceededError } from './types.ts';
 import { GEMINI_API_BASE, GEMINI_MODEL, DEFAULT_SEARCH_RADIUS, MAX_SEARCH_RADIUS, MAPS_API_BASE, MIN_RESULTS_THRESHOLD, SEARCH_RADIUS_STEPS } from './constants.ts';
 import { getTimeContext } from './utils.ts';
 import { buildContextualPrompt } from './prompts/system-prompts.ts';
 import { calculateDistance, filterAndSort, deduplicatePlaces } from './geo-utils.ts';
 import { PlaceCacheManager } from './place-cache-manager.ts';
+import { ApiCostTracker } from './api-cost-tracker.ts';
 
 export class GeminiClient {
   private apiKey: string;
   private mapsApiKey: string;
   private cacheManager: PlaceCacheManager | null = null;
+  private costTracker: ApiCostTracker | null = null;
 
   constructor(geminiApiKey: string, mapsApiKey: string, supabaseUrl?: string, supabaseKey?: string) {
     this.apiKey = geminiApiKey;
     this.mapsApiKey = mapsApiKey;
     
-    // Initialize cache manager if Supabase credentials provided
+    // Initialize cache manager and cost tracker if Supabase credentials provided
     if (supabaseUrl && supabaseKey) {
       this.cacheManager = new PlaceCacheManager(supabaseUrl, supabaseKey);
-      console.log('GeminiClient: Cache manager initialized');
+      this.costTracker = new ApiCostTracker(supabaseUrl, supabaseKey);
+      console.log('GeminiClient: Cache manager and cost tracker initialized');
     }
   }
 
@@ -27,11 +30,61 @@ export class GeminiClient {
    * Main search method - sends grounded request to Gemini
    */
   async search(request: GeminiRequest): Promise<GeminiResponse> {
+    const userId = request.userId || 0;
+    
+    // If cost tracking enabled, check quotas and cache
+    if (this.costTracker && this.cacheManager) {
+      // 1. Check quota limits
+      const quotaStatus = await this.costTracker.canMakeApiCall(userId, 'gemini');
+      
+      // 2. If quota exceeded, try to return from cache
+      if (!quotaStatus.canProceed) {
+        console.warn(`Quota exceeded for user ${userId}, checking cache...`);
+        const cached = await this.cacheManager.getCachedSearchResults(request.query, request.location);
+        
+        if (cached) {
+          await this.costTracker.logApiCall(userId, 'gemini', 'search', 0, true, true);
+          throw new QuotaExceededError(
+            quotaStatus.globalLimitReached ? 'global' : 'user',
+            true
+          );
+        }
+        
+        // No cache available
+        await this.costTracker.logApiCall(userId, 'gemini', 'search', 0, false, true);
+        throw new QuotaExceededError(
+          quotaStatus.globalLimitReached ? 'global' : 'user',
+          false
+        );
+      }
+      
+      // 3. Check cache first (even if quota OK, to save costs)
+      const cached = await this.cacheManager.getCachedSearchResults(request.query, request.location);
+      if (cached) {
+        console.log(`✓ Using cached search result for query: ${request.query}`);
+        await this.costTracker.logApiCall(userId, 'gemini', 'search', 0, true, false);
+        return cached;
+      }
+    }
+    
+    // 4. Make real API call
     const prompt = this.buildPrompt(request);
     
     try {
       const response = await this.callGeminiAPI(prompt, request.location);
-      return this.parseResponse(response, request);
+      const result = this.parseResponse(response, request);
+      
+      // 5. Log and cache the result
+      if (this.costTracker) {
+        const cost = this.costTracker.estimateCost('search');
+        await this.costTracker.logApiCall(userId, 'gemini', 'search', cost, false, false);
+      }
+      
+      if (this.cacheManager) {
+        await this.cacheManager.cacheSearchResults(request.query, request.location, result);
+      }
+      
+      return result;
     } catch (error) {
       console.error('Gemini API error:', error);
       throw new Error('Failed to get AI response');
@@ -876,7 +929,30 @@ export class GeminiClient {
    * Returns location (lat/lon) or null if city not found
    * Universal approach: works for cities worldwide, not just Russia
    */
-  async geocodeCity(cityName: string): Promise<Location | null> {
+  async geocodeCity(cityName: string, userId = 0): Promise<Location | null> {
+    // Check cache first (geocoding cache is long-term)
+    if (this.cacheManager) {
+      const cached = await this.cacheManager.getCachedGeocode(cityName);
+      if (cached) {
+        console.log(`✓ Using cached geocoding for city: ${cityName}`);
+        if (this.costTracker) {
+          await this.costTracker.logApiCall(userId, 'google_maps', 'geocode', 0, true, false);
+        }
+        return cached;
+      }
+    }
+    
+    // Check quota if tracking enabled
+    if (this.costTracker) {
+      const quotaStatus = await this.costTracker.canMakeApiCall(userId, 'google_maps');
+      if (!quotaStatus.canProceed) {
+        console.warn(`Quota exceeded for geocoding, user ${userId}`);
+        // For geocoding, we don't throw error - just return null
+        await this.costTracker.logApiCall(userId, 'google_maps', 'geocode', 0, false, true);
+        return null;
+      }
+    }
+    
     try {
       // Step 1: Try without country restriction first (для международных городов)
       console.log(`Geocoding city (universal): "${cityName}"`);
@@ -898,10 +974,21 @@ export class GeminiClient {
           const location = bestResult.geometry.location;
           
           console.log(`City geocoded successfully (universal): "${cityName}" -> ${location.lat}, ${location.lng}`);
-          return {
+          const result = {
             lat: location.lat,
             lon: location.lng,
           };
+          
+          // Log and cache the result
+          if (this.costTracker) {
+            const cost = this.costTracker.estimateCost('geocode');
+            await this.costTracker.logApiCall(userId, 'google_maps', 'geocode', cost, false, false);
+          }
+          if (this.cacheManager) {
+            await this.cacheManager.cacheGeocode(cityName, result);
+          }
+          
+          return result;
         }
       }
       
@@ -919,10 +1006,21 @@ export class GeminiClient {
           if (data2.status === 'OK' && data2.results && data2.results.length > 0) {
             const location = data2.results[0].geometry.location;
             console.log(`City geocoded with Russia: "${cityName}" -> ${location.lat}, ${location.lng}`);
-            return {
+            const result = {
               lat: location.lat,
               lon: location.lng,
             };
+            
+            // Log and cache the result
+            if (this.costTracker) {
+              const cost = this.costTracker.estimateCost('geocode');
+              await this.costTracker.logApiCall(userId, 'google_maps', 'geocode', cost, false, false);
+            }
+            if (this.cacheManager) {
+              await this.cacheManager.cacheGeocode(cityName, result);
+            }
+            
+            return result;
           }
         }
       }

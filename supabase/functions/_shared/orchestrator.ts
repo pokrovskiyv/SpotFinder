@@ -17,7 +17,7 @@ import {
   createRouteButton,
   createMultiPlaceButtons,
 } from './telegram-formatter.ts';
-import { TelegramUpdate, PlaceResult, Location } from './types.ts';
+import { TelegramUpdate, PlaceResult, Location, QuotaExceededError } from './types.ts';
 import { MESSAGES, DONATE_AMOUNTS } from './constants.ts';
 import { isFollowUpQuestion, extractOrdinal, extractCityFromQuery, isRouteRequest, extractPlaceIndices, buildMultiStopRouteUrl, isMultiPlaceRequest, extractPlaceCount } from './utils.ts';
 import { ContextHandler } from './context-handler.ts';
@@ -45,7 +45,7 @@ export class Orchestrator {
     console.log('Orchestrator: Creating UserManager...');
     this.userManager = new UserManager(supabaseUrl, supabaseKey);
     console.log('Orchestrator: UserManager created');
-    console.log('Orchestrator: Creating GeminiClient with cache...');
+    console.log('Orchestrator: Creating GeminiClient with cache and cost tracking...');
     this.geminiClient = new GeminiClient(geminiApiKey, mapsApiKey, supabaseUrl, supabaseKey);
     console.log('Orchestrator: GeminiClient created');
     console.log('Orchestrator: Creating TelegramClient...');
@@ -223,7 +223,7 @@ export class Orchestrator {
       console.log(`City detected in query: "${cityName}"`);
       
       // Try to geocode the city
-      const cityLocation = await this.geminiClient.geocodeCity(cityName);
+      const cityLocation = await this.geminiClient.geocodeCity(cityName, userId);
       
       if (cityLocation) {
         searchLocation = cityLocation;
@@ -305,12 +305,27 @@ export class Orchestrator {
       const requestedCount = extractPlaceCount(query);
 
       // Get Gemini's response with Maps Grounding - this will search places and provide answer
-      const geminiResponse = await this.geminiClient.search({
-        query,
-        location,
-        context: preferences ? { user_preferences: preferences } : undefined,
-        isRouteRequest: wantsMultiplePlaces, // Hint to Gemini to find multiple places
-      });
+      let geminiResponse;
+      try {
+        geminiResponse = await this.geminiClient.search({
+          query,
+          location,
+          userId,
+          context: preferences ? { user_preferences: preferences } : undefined,
+          isRouteRequest: wantsMultiplePlaces, // Hint to Gemini to find multiple places
+        });
+      } catch (error) {
+        if (error instanceof QuotaExceededError) {
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: error.cacheAvailable 
+              ? MESSAGES.QUOTA_EXCEEDED_WITH_CACHE 
+              : MESSAGES.QUOTA_EXCEEDED_NO_CACHE,
+          });
+          return;
+        }
+        throw error;
+      }
 
       // Check if Gemini extracted a city from the query
       let searchLocation = location;
@@ -318,7 +333,7 @@ export class Orchestrator {
       if (geminiResponse.extractedCity) {
         console.log(`Gemini detected city in query: "${geminiResponse.extractedCity}"`);
         
-        const cityLocation = await this.geminiClient.geocodeCity(geminiResponse.extractedCity);
+        const cityLocation = await this.geminiClient.geocodeCity(geminiResponse.extractedCity, userId);
         
         if (cityLocation) {
           searchLocation = cityLocation;
@@ -570,14 +585,29 @@ export class Orchestrator {
       // General follow-up question, send to Gemini with context
       const session = await this.sessionManager.getSession(userId);
       
-      const geminiResponse = await this.geminiClient.search({
-        query,
-        location,
-        context: {
-          last_query: session?.last_query || undefined,
-          last_results: lastResults,
-        },
-      });
+      let geminiResponse;
+      try {
+        geminiResponse = await this.geminiClient.search({
+          query,
+          location,
+          userId,
+          context: {
+            last_query: session?.last_query || undefined,
+            last_results: lastResults,
+          },
+        });
+      } catch (error) {
+        if (error instanceof QuotaExceededError) {
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: error.cacheAvailable 
+              ? MESSAGES.QUOTA_EXCEEDED_WITH_CACHE 
+              : MESSAGES.QUOTA_EXCEEDED_NO_CACHE,
+          });
+          return;
+        }
+        throw error;
+      }
 
       await this.telegramClient.sendMessage({
         chatId,
@@ -1067,12 +1097,27 @@ export class Orchestrator {
       const preferences = await this.userManager.getUserPreferences(userId);
 
       // Get Gemini's response with route planning flag
-      const geminiResponse = await this.geminiClient.search({
-        query,
-        location,
-        context: preferences ? { user_preferences: preferences } : undefined,
-        isRouteRequest: true,
-      });
+      let geminiResponse;
+      try {
+        geminiResponse = await this.geminiClient.search({
+          query,
+          location,
+          userId,
+          context: preferences ? { user_preferences: preferences } : undefined,
+          isRouteRequest: true,
+        });
+      } catch (error) {
+        if (error instanceof QuotaExceededError) {
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: error.cacheAvailable 
+              ? MESSAGES.QUOTA_EXCEEDED_WITH_CACHE 
+              : MESSAGES.QUOTA_EXCEEDED_NO_CACHE,
+          });
+          return;
+        }
+        throw error;
+      }
 
       // Get full place details for all places
       const placesWithDetails = await Promise.all(

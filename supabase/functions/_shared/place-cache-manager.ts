@@ -1,7 +1,7 @@
 // Place Cache Manager - manages place data caching for API optimization
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { DBPlaceCache, PlaceResult } from './types.ts';
+import { DBPlaceCache, PlaceResult, Location, GeminiResponse } from './types.ts';
 
 export class PlaceCacheManager {
   private supabase: SupabaseClient;
@@ -174,6 +174,158 @@ export class PlaceCacheManager {
     } catch (error) {
       console.error('Error getting cache stats:', error);
       return { total: 0, expired: 0, valid: 0 };
+    }
+  }
+
+  /**
+   * Generate MD5-like hash for query (simple hash for demo)
+   */
+  private generateQueryHash(query: string): string {
+    // Simple hash function (for production, use crypto library)
+    let hash = 0;
+    for (let i = 0; i < query.length; i++) {
+      const char = query.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  /**
+   * Generate hash for location (rounded to 0.01 degrees for caching nearby searches)
+   */
+  private generateLocationHash(lat: number, lon: number): string {
+    const roundedLat = Math.round(lat * 100) / 100;
+    const roundedLon = Math.round(lon * 100) / 100;
+    return `${roundedLat},${roundedLon}`;
+  }
+
+  /**
+   * Get cached search results
+   */
+  async getCachedSearchResults(query: string, location: Location): Promise<GeminiResponse | null> {
+    try {
+      const queryHash = this.generateQueryHash(query.toLowerCase().trim());
+      const locationHash = this.generateLocationHash(location.lat, location.lon);
+
+      const { data, error } = await this.supabase
+        .from('search_results_cache')
+        .select('*')
+        .eq('query_hash', queryHash)
+        .eq('location_hash', locationHash)
+        .single();
+
+      if (error || !data) {
+        return null;
+      }
+
+      // Check if cache is still valid
+      const expiresAt = new Date(data.expires_at);
+      if (expiresAt < new Date()) {
+        console.log(`Search cache expired for query: ${query}`);
+        return null;
+      }
+
+      console.log(`✓ Search cache hit for query: ${query}`);
+      return data.results as GeminiResponse;
+    } catch (error) {
+      console.error('Error reading search cache:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Cache search results
+   */
+  async cacheSearchResults(query: string, location: Location, results: GeminiResponse): Promise<void> {
+    try {
+      const queryHash = this.generateQueryHash(query.toLowerCase().trim());
+      const locationHash = this.generateLocationHash(location.lat, location.lon);
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 4 * 60 * 60 * 1000); // 4 hours
+
+      const cacheData = {
+        query_hash: queryHash,
+        location_hash: locationHash,
+        results: results,
+        cached_at: now.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      };
+
+      const { error } = await this.supabase
+        .from('search_results_cache')
+        .upsert(cacheData, {
+          onConflict: 'query_hash,location_hash',
+        });
+
+      if (error) {
+        console.error('Failed to cache search results:', error);
+      } else {
+        console.log(`✓ Cached search results for query: ${query} until ${expiresAt.toISOString()}`);
+      }
+    } catch (error) {
+      console.error('Error caching search results:', error);
+      // Don't throw - caching is not critical
+    }
+  }
+
+  /**
+   * Get cached geocoding result for a city
+   */
+  async getCachedGeocode(cityName: string): Promise<Location | null> {
+    try {
+      const normalizedName = cityName.toLowerCase().trim();
+
+      const { data, error } = await this.supabase
+        .from('geocoding_cache')
+        .select('*')
+        .eq('city_name', normalizedName)
+        .single();
+
+      if (error || !data) {
+        return null;
+      }
+
+      console.log(`✓ Geocoding cache hit for city: ${cityName}`);
+      return {
+        lat: data.latitude,
+        lon: data.longitude,
+      };
+    } catch (error) {
+      console.error('Error reading geocoding cache:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Cache geocoding result for a city (long-term)
+   */
+  async cacheGeocode(cityName: string, location: Location): Promise<void> {
+    try {
+      const normalizedName = cityName.toLowerCase().trim();
+      const now = new Date();
+
+      const cacheData = {
+        city_name: normalizedName,
+        latitude: location.lat,
+        longitude: location.lon,
+        cached_at: now.toISOString(),
+      };
+
+      const { error } = await this.supabase
+        .from('geocoding_cache')
+        .upsert(cacheData, {
+          onConflict: 'city_name',
+        });
+
+      if (error) {
+        console.error('Failed to cache geocoding:', error);
+      } else {
+        console.log(`✓ Cached geocoding for city: ${cityName}`);
+      }
+    } catch (error) {
+      console.error('Error caching geocoding:', error);
+      // Don't throw - caching is not critical
     }
   }
 }

@@ -172,9 +172,37 @@ export interface DBUserAction {
   created_at: string;
 }
 
+export interface DBApiCostMetric {
+  metric_id: string;
+  user_id: number;
+  api_provider: 'gemini' | 'google_maps';
+  api_type: string;
+  tokens_estimated: number;
+  cost_usd: number;
+  from_cache: boolean;
+  quota_exceeded: boolean;
+  timestamp: string;
+  date: string;
+}
+
+export interface QuotaStatus {
+  canProceed: boolean;
+  globalLimitReached: boolean;
+  userLimitReached: boolean;
+  remainingCalls?: number;
+}
+
+export class QuotaExceededError extends Error {
+  constructor(public quotaType: 'global' | 'user', public cacheAvailable: boolean) {
+    super('API quota exceeded');
+    this.name = 'QuotaExceededError';
+  }
+}
+
 export interface GeminiRequest {
   query: string;
   location: Location;
+  userId?: number; // For cost tracking and quota management
   context?: {
     last_query?: string;
     last_results?: PlaceResult[];

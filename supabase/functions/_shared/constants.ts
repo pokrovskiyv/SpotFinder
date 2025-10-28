@@ -109,6 +109,13 @@ export const MESSAGES = {
 Нажми на кнопку ниже, чтобы открыть маршрут в Google Maps.`,
   
   ROUTE_ERROR_NOT_ENOUGH: 'Недостаточно мест для построения маршрута. Нужно минимум 2 места.',
+  
+  QUOTA_EXCEEDED_WITH_CACHE: '⚠️ Лимит запросов превышен, показываю результаты из кэша.\n\nКэшированные данные могут быть неактуальными.',
+  
+  QUOTA_EXCEEDED_NO_CACHE: '❌ Дневной лимит запросов исчерпан.\n\nПопробуй снова завтра или поддержи бота донатом (/donate), чтобы помочь увеличить лимиты!',
+  
+  USER_QUOTA_WARNING: (remaining: number) => 
+    `⚠️ У тебя осталось ${remaining} ${remaining === 1 ? 'запрос' : remaining < 5 ? 'запроса' : 'запросов'} сегодня.`,
 } as const;
 
 // Button labels
@@ -133,6 +140,31 @@ export const BUTTONS = {
 
 // Donation amounts (in Stars)
 export const DONATE_AMOUNTS = [50, 100, 200, 500, 1000, 2500] as const;
+
+// API Cost Limits and Configuration
+export const API_COST_LIMITS = {
+  GLOBAL: {
+    GEMINI_CALLS_PER_DAY: 1000,
+    MAPS_CALLS_PER_DAY: 5000,
+    DAILY_COST_USD: 50.0, // Maximum daily cost in USD
+  },
+  PER_USER: {
+    GEMINI_CALLS_PER_DAY: 50,
+    MAPS_CALLS_PER_DAY: 200,
+  },
+  CACHE: {
+    SEARCH_RESULTS_TTL_HOURS: 4,
+    PLACE_DETAILS_TTL_HOURS: 24,
+    GEOCODING_TTL_DAYS: 365, // Cities don't change coordinates
+  },
+  COSTS_USD: {
+    GEMINI_SEARCH: 0.002, // Estimated $0.002 per search request
+    GEMINI_TRANSLATE: 0.001, // Estimated $0.001 per translation
+    MAPS_PLACES: 0.017, // $17/1000 = $0.017 per request
+    MAPS_GEOCODE: 0.005, // $5/1000 = $0.005 per request
+    MAPS_DETAILS: 0.017, // $17/1000 = $0.017 per request
+  },
+} as const;
 
 // Russian cities mapping for city extraction from queries
 export const CITY_ALIASES: Record<string, string> = {
