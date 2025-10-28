@@ -341,9 +341,9 @@ export function buildMultiStopRouteUrl(
   
   url += `&destination=${destination}`;
   
-  // Add waypoints if any
+  // Add waypoints if any - use %7C as separator (URL-encoded |)
   if (waypoints.length > 0) {
-    url += `&waypoints=${waypoints.join('|')}`;
+    url += `&waypoints=${waypoints.join('%7C')}`;
   }
   
   // Set travel mode
