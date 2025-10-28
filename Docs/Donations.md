@@ -94,3 +94,4 @@ supabase db push
 - `getUserDonations(userId)` - все донаты пользователя
 - `getTotalDonations(userId)` - общая сумма донатов пользователя
 
+

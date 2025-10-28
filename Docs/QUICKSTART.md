@@ -69,6 +69,13 @@ set SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
 ## Шаг 4: Deploy бота (5 минут)
 
+> ⚠️ **КРИТИЧЕСКИ ВАЖНО:** После развертывания используйте **правильный формат URL** для webhook!
+> 
+> - ✅ Правильно: `https://PROJECT.functions.supabase.co/telegram-webhook`
+> - ❌ Неправильно: `https://PROJECT.supabase.co/functions/v1/telegram-webhook` (вызывает 401 ошибки!)
+> 
+> Подробнее: [WEBHOOK_SETUP.md](WEBHOOK_SETUP.md)
+
 ### Установка Supabase CLI
 
 **Windows (PowerShell)**:
@@ -110,17 +117,33 @@ cd SpotFinder
 supabase functions deploy telegram-webhook
 \`\`\`
 
-Скопируй URL из вывода:
-\`\`\`
-https://xxxxx.supabase.co/functions/v1/telegram-webhook
+### Установка webhook (АВТОМАТИЧЕСКИ - РЕКОМЕНДУЕТСЯ)
+
+**Используйте скрипт автоматической настройки:**
+
+\`\`\`bash
+# Установите переменные окружения
+export TELEGRAM_BOT_TOKEN="your_token"
+export SUPABASE_PROJECT_ID="your_project_id"
+
+# Запустите скрипт
+deno run --allow-env --allow-net scripts/setup-webhook.ts
 \`\`\`
 
-### Установка webhook
+Скрипт автоматически:
+- ✅ Использует **правильный формат URL** (`.functions.supabase.co`)
+- ✅ Устанавливает webhook
+- ✅ Проверяет статус и выявляет ошибки
+
+### Установка webhook (ВРУЧНУЮ - если нужно)
 
 **Windows (PowerShell)**:
 \`\`\`powershell
 $TOKEN = "your_telegram_token"
-$WEBHOOK_URL = "https://xxxxx.supabase.co/functions/v1/telegram-webhook"
+$PROJECT_ID = "your_supabase_project_id"  # Например: icnnwmjrprufrohiyfpm
+
+# ВАЖНО: Используйте .functions.supabase.co (НЕ .supabase.co/functions/v1/)
+$WEBHOOK_URL = "https://$PROJECT_ID.functions.supabase.co/telegram-webhook"
 
 Invoke-RestMethod -Uri "https://api.telegram.org/bot$TOKEN/setWebhook" `
   -Method Post `
@@ -130,10 +153,13 @@ Invoke-RestMethod -Uri "https://api.telegram.org/bot$TOKEN/setWebhook" `
 
 **Mac/Linux/Git Bash**:
 \`\`\`bash
-curl -X POST "https://api.telegram.org/bot<YOUR_TOKEN>/setWebhook" \
+# ВАЖНО: Используйте .functions.supabase.co (НЕ .supabase.co/functions/v1/)
+curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://xxxxx.supabase.co/functions/v1/telegram-webhook"}'
+  -d "{\"url\": \"https://${SUPABASE_PROJECT_ID}.functions.supabase.co/telegram-webhook\"}"
 \`\`\`
+
+> 📖 **Подробная документация:** [WEBHOOK_SETUP.md](WEBHOOK_SETUP.md)
 
 ## Шаг 4: Тестирование (2 минуты)
 
