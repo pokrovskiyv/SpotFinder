@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS search_history (
     -- Output data
     gemini_response_text TEXT NULL,
     returned_place_ids TEXT[] NULL,
+    results_count INT DEFAULT 0,
+    top_result JSONB NULL,
     
     -- User feedback (critical for improvement!)
     selected_place_id TEXT NULL,

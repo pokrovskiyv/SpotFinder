@@ -5,14 +5,22 @@ import { GEMINI_API_BASE, GEMINI_MODEL, DEFAULT_SEARCH_RADIUS, MAX_SEARCH_RADIUS
 import { getTimeContext } from './utils.ts';
 import { buildContextualPrompt } from './prompts/system-prompts.ts';
 import { calculateDistance, filterAndSort, deduplicatePlaces } from './geo-utils.ts';
+import { PlaceCacheManager } from './place-cache-manager.ts';
 
 export class GeminiClient {
   private apiKey: string;
   private mapsApiKey: string;
+  private cacheManager: PlaceCacheManager | null = null;
 
-  constructor(geminiApiKey: string, mapsApiKey: string) {
+  constructor(geminiApiKey: string, mapsApiKey: string, supabaseUrl?: string, supabaseKey?: string) {
     this.apiKey = geminiApiKey;
     this.mapsApiKey = mapsApiKey;
+    
+    // Initialize cache manager if Supabase credentials provided
+    if (supabaseUrl && supabaseKey) {
+      this.cacheManager = new PlaceCacheManager(supabaseUrl, supabaseKey);
+      console.log('GeminiClient: Cache manager initialized');
+    }
   }
 
   /**
@@ -647,6 +655,15 @@ export class GeminiClient {
   async getPlaceDetails(placeId: string, includeReviews = false): Promise<PlaceResult> {
     console.log(`getPlaceDetails: placeId=${placeId}, includeReviews=${includeReviews}`);
     
+    // Try to get from cache first (only for non-review requests)
+    if (!includeReviews && this.cacheManager) {
+      const cached = await this.cacheManager.getCachedPlace(placeId);
+      if (cached) {
+        console.log(`✓ Using cached data for place ${placeId}`);
+        return cached;
+      }
+    }
+    
     const url = `https://maps.googleapis.com/maps/api/place/details/json`;
     
     const fields = includeReviews 
@@ -744,6 +761,11 @@ export class GeminiClient {
         console.log('No photos available from API');
         result.photos = [];
       }
+    }
+
+    // Cache the result (only for non-review requests to keep cache clean)
+    if (!includeReviews && this.cacheManager) {
+      await this.cacheManager.cachePlace(result);
     }
 
     return result;

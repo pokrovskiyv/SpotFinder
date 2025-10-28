@@ -137,6 +137,8 @@ export interface DBSearchHistory {
   location_lon: number;
   gemini_response_text: string | null;
   returned_place_ids: string[] | null;
+  results_count: number;
+  top_result: PlaceResult | null;
   selected_place_id: string | null;
   user_rating: number | null;
 }
@@ -147,6 +149,26 @@ export interface DBDonation {
   amount_stars: number;
   telegram_payment_charge_id: string;
   status: 'completed' | 'pending' | 'refunded';
+  created_at: string;
+}
+
+export interface DBPlaceCache {
+  place_id: string;
+  name: string;
+  address: string | null;
+  location: string | null; // PostGIS GEOMETRY
+  google_data_jsonb: PlaceResult | null;
+  last_fetched_at: string;
+  cache_expires_at: string;
+}
+
+export interface DBUserAction {
+  action_id: string;
+  user_id: number;
+  action_type: 'view_reviews' | 'view_route' | 'click_maps' | 'select_place' | 'donation';
+  place_id: string | null;
+  search_id: string | null;
+  metadata: Record<string, any> | null;
   created_at: string;
 }
 

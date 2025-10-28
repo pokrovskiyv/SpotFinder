@@ -123,8 +123,9 @@ export class SessionManager {
   async saveSearchContext(
     userId: number,
     query: string,
-    results: PlaceResult[]
-  ): Promise<void> {
+    results: PlaceResult[],
+    geminiResponseText?: string
+  ): Promise<string | null> {
     // Update session
     const { error: sessionError } = await this.supabase
       .from('sessions')
@@ -140,8 +141,8 @@ export class SessionManager {
       throw new Error(`Failed to save search context: ${sessionError.message}`);
     }
 
-    // Save to search history
-    await this.saveSearchHistory(userId, query, results);
+    // Save to search history and return search_id
+    return await this.saveSearchHistory(userId, query, results, geminiResponseText);
   }
 
   /**
@@ -150,30 +151,43 @@ export class SessionManager {
   async saveSearchHistory(
     userId: number,
     query: string,
-    results: PlaceResult[]
-  ): Promise<void> {
+    results: PlaceResult[],
+    geminiResponseText?: string
+  ): Promise<string | null> {
     // Get current location from session
     const session = await this.getSession(userId);
     if (!session) {
       console.error('No session found for user:', userId);
-      return;
+      return null;
     }
 
-    const { error } = await this.supabase
+    // Extract place IDs from results
+    const placeIds = results
+      .map(r => r.place_id)
+      .filter((id): id is string => id !== undefined && id !== null);
+
+    const { data, error } = await this.supabase
       .from('search_history')
       .insert({
         user_id: userId,
-        query,
+        query_text: query,
+        location_lat: session.current_location_lat,
+        location_lon: session.current_location_lon,
+        gemini_response_text: geminiResponseText || null,
+        returned_place_ids: placeIds.length > 0 ? placeIds : null,
         results_count: results.length,
-        top_result: results[0] || null,
-        search_location_lat: session.current_location_lat,
-        search_location_lon: session.current_location_lon,
-      });
+        top_result: results.length > 0 ? results[0] : null,
+      })
+      .select('search_id')
+      .single();
 
     if (error) {
       console.error('Failed to save search history:', error);
       // Don't throw - this is not critical
+      return null;
     }
+
+    return data?.search_id || null;
   }
 
   /**

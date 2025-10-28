@@ -5,6 +5,7 @@ import { UserManager } from './user-manager.ts';
 import { GeminiClient } from './gemini-client.ts';
 import { TelegramClient } from './telegram-client.ts';
 import { DonationManager } from './donation-manager.ts';
+import { UserActionTracker } from './user-action-tracker.ts';
 import {
   formatPlacesMessage,
   formatWelcomeMessage,
@@ -28,6 +29,7 @@ export class Orchestrator {
   private telegramClient: TelegramClient;
   private contextHandler: ContextHandler;
   private donationManager: DonationManager;
+  private actionTracker: UserActionTracker;
 
   constructor(
     supabaseUrl: string,
@@ -43,8 +45,8 @@ export class Orchestrator {
     console.log('Orchestrator: Creating UserManager...');
     this.userManager = new UserManager(supabaseUrl, supabaseKey);
     console.log('Orchestrator: UserManager created');
-    console.log('Orchestrator: Creating GeminiClient...');
-    this.geminiClient = new GeminiClient(geminiApiKey, mapsApiKey);
+    console.log('Orchestrator: Creating GeminiClient with cache...');
+    this.geminiClient = new GeminiClient(geminiApiKey, mapsApiKey, supabaseUrl, supabaseKey);
     console.log('Orchestrator: GeminiClient created');
     console.log('Orchestrator: Creating TelegramClient...');
     this.telegramClient = new TelegramClient(telegramToken);
@@ -52,6 +54,9 @@ export class Orchestrator {
     console.log('Orchestrator: Creating DonationManager...');
     this.donationManager = new DonationManager(supabaseUrl, supabaseKey);
     console.log('Orchestrator: DonationManager created');
+    console.log('Orchestrator: Creating UserActionTracker...');
+    this.actionTracker = new UserActionTracker(supabaseUrl, supabaseKey);
+    console.log('Orchestrator: UserActionTracker created');
     console.log('Orchestrator: Creating ContextHandler...');
     this.contextHandler = new ContextHandler();
     console.log('Orchestrator: Initialized successfully');
@@ -477,8 +482,13 @@ export class Orchestrator {
         ? placesWithCoordinates.slice(0, 5)
         : placesWithCoordinates;
       
-      // Save search context with limited places for routes
-      await this.sessionManager.saveSearchContext(userId, query, placesToShow);
+      // Save search context with limited places for routes and gemini response
+      const searchId = await this.sessionManager.saveSearchContext(
+        userId, 
+        query, 
+        placesToShow, 
+        usedFallback ? undefined : geminiResponse.text
+      );
 
       // Format message - use Gemini's AI text only if Gemini found places
       const introText = usedFallback ? undefined : geminiResponse.text;
@@ -607,6 +617,12 @@ export class Orchestrator {
         });
         return;
       }
+      
+      // Track action
+      await this.actionTracker.trackAction(userId, 'view_reviews', {
+        placeId,
+        index,
+      });
       
       await this.telegramClient.sendTyping(chatId);
       
@@ -755,7 +771,15 @@ export class Orchestrator {
         parseMode: 'Markdown',
       });
     } else if (action === 'select') {
-      // User selected a place - could track this for analytics
+      // User selected a place - track for analytics
+      await this.actionTracker.trackAction(userId, 'select_place', {
+        placeId,
+        index,
+      });
+      
+      // Update search history with selected place
+      await this.actionTracker.updateSearchWithSelection(userId, placeId);
+      
       await this.telegramClient.answerCallbackQuery(
         callbackQuery.id,
         'Выбрано! Что еще найти?',
@@ -781,6 +805,12 @@ export class Orchestrator {
         });
         return;
       }
+      
+      // Track route view action
+      await this.actionTracker.trackAction(userId, 'view_route', {
+        placeCount: lastResults.length,
+        placeIds: lastResults.map(p => p.place_id).filter(Boolean),
+      });
       
       const userLocation = await this.sessionManager.getValidLocation(userId);
       
@@ -913,6 +943,13 @@ export class Orchestrator {
       // Get total donations for user
       const total = await this.donationManager.getTotalDonations(userId);
 
+      // Track donation
+      await this.actionTracker.trackAction(userId, 'donation', {
+        amount,
+        paymentId,
+        totalDonated: total,
+      });
+      
       // Send thank you message
       const thankYouMsg = MESSAGES.DONATE_THANK_YOU(amount, total);
       
@@ -1130,7 +1167,12 @@ export class Orchestrator {
       }
 
       // Save search context
-      await this.sessionManager.saveSearchContext(userId, query, placesWithCoordinates);
+      const searchId = await this.sessionManager.saveSearchContext(
+        userId, 
+        query, 
+        placesWithCoordinates, 
+        geminiResponse.text
+      );
 
       // Show all places numbered
       const messageText = formatPlacesMessage(placesWithCoordinates, geminiResponse.text, true);
