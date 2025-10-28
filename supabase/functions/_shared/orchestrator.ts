@@ -415,7 +415,16 @@ export class Orchestrator {
       // Keep all places that have at least a name
       const validPlaces = placesWithDetails.filter(p => p.name && p.name !== 'Без названия');
 
-      if (validPlaces.length === 0) {
+      // Filter out places without coordinates (can't build routes without them)
+      const placesWithCoordinates = validPlaces.filter(p => {
+        if (!p.geometry?.location) {
+          console.warn(`⚠️ Excluding "${p.name}" from results - no coordinates available`);
+          return false;
+        }
+        return true;
+      });
+
+      if (placesWithCoordinates.length === 0) {
         await this.telegramClient.sendMessage({
           chatId,
           text: MESSAGES.ERROR_NO_RESULTS,
@@ -424,14 +433,14 @@ export class Orchestrator {
       }
 
       // Determine if we should show multiple places
-      const showMultiple = wantsMultiplePlaces && validPlaces.length >= 2;
+      const showMultiple = wantsMultiplePlaces && placesWithCoordinates.length >= 2;
       
       // Limit to requested count or max 5
       const placesToShow = showMultiple && requestedCount
-        ? validPlaces.slice(0, Math.min(requestedCount, 5))
+        ? placesWithCoordinates.slice(0, Math.min(requestedCount, 5))
         : showMultiple
-        ? validPlaces.slice(0, 5)
-        : validPlaces;
+        ? placesWithCoordinates.slice(0, 5)
+        : placesWithCoordinates;
       
       // Save search context with limited places for routes
       await this.sessionManager.saveSearchContext(userId, query, placesToShow);
@@ -447,7 +456,7 @@ export class Orchestrator {
       // Choose buttons based on number of places
       const buttons = showMultiple && placesToShow.length >= 2
         ? createMultiPlaceButtons(placesToShow, await this.sessionManager.getValidLocation(userId))
-        : createPlaceButtons(validPlaces[0], 0);
+        : createPlaceButtons(placesWithCoordinates[0], 0);
 
       await this.telegramClient.sendMessage({
         chatId,
@@ -1036,19 +1045,28 @@ export class Orchestrator {
 
       const validPlaces = placesWithDetails.filter(p => p.name && p.name !== 'Без названия');
 
-      if (validPlaces.length < 2) {
+      // Filter out places without coordinates (can't build routes without them)
+      const placesWithCoordinates = validPlaces.filter(p => {
+        if (!p.geometry?.location) {
+          console.warn(`⚠️ Excluding "${p.name}" from route results - no coordinates available`);
+          return false;
+        }
+        return true;
+      });
+
+      if (placesWithCoordinates.length < 2) {
         await this.telegramClient.sendMessage({
           chatId,
-          text: 'Для построения маршрута нужно минимум 2 места. Попробуй уточнить запрос.',
+          text: 'Для построения маршрута нужно минимум 2 места с координатами. Попробуй уточнить запрос.',
         });
         return;
       }
 
       // Save search context
-      await this.sessionManager.saveSearchContext(userId, query, validPlaces);
+      await this.sessionManager.saveSearchContext(userId, query, placesWithCoordinates);
 
       // Show all places numbered
-      const messageText = formatPlacesMessage(validPlaces, geminiResponse.text, true);
+      const messageText = formatPlacesMessage(placesWithCoordinates, geminiResponse.text, true);
       const userLocation = await this.sessionManager.getValidLocation(userId);
       
       await this.telegramClient.sendMessage({
@@ -1056,7 +1074,7 @@ export class Orchestrator {
         text: messageText,
         parseMode: 'Markdown',
         replyMarkup: this.telegramClient.createInlineKeyboard(
-          createMultiPlaceButtons(validPlaces, userLocation)
+          createMultiPlaceButtons(placesWithCoordinates, userLocation)
         ),
       });
 

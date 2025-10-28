@@ -334,20 +334,17 @@ export function buildMultiStopRouteUrl(
   }
   
   // Build waypoints (all places except the last one)
+  // Always use coordinates - most reliable method (place_id from Gemini often doesn't work)
   const waypoints: string[] = [];
   for (let i = 0; i < selectedPlaces.length - 1; i++) {
     const place = selectedPlaces[i];
     
-    if (isValidPlaceId(place.place_id)) {
-      const waypoint = `place_id:${place.place_id}`;
-      waypoints.push(waypoint);
-      console.log(`  - Waypoint ${i + 1}: ${waypoint} (valid)`);
-    } else if (place.geometry?.location) {
+    if (place.geometry?.location) {
       const waypoint = `${place.geometry.location.lat},${place.geometry.location.lng}`;
       waypoints.push(waypoint);
-      console.log(`  - Waypoint ${i + 1}: ${waypoint} (coordinates - place_id invalid: ${place.place_id || 'missing'})`);
+      console.log(`  - Waypoint ${i + 1}: ${waypoint} (coordinates)`);
     } else {
-      console.warn(`  - Waypoint ${i + 1}: skipped (no valid place_id or coordinates)`);
+      console.warn(`  - Waypoint ${i + 1}: skipped (no coordinates for "${place.name || 'unknown'}")`);
     }
   }
   
@@ -355,14 +352,11 @@ export function buildMultiStopRouteUrl(
   const lastPlace = selectedPlaces[selectedPlaces.length - 1];
   let destination: string;
   
-  if (isValidPlaceId(lastPlace.place_id)) {
-    destination = `place_id:${lastPlace.place_id}`;
-    console.log(`  - Destination: ${destination} (valid)`);
-  } else if (lastPlace.geometry?.location) {
+  if (lastPlace.geometry?.location) {
     destination = `${lastPlace.geometry.location.lat},${lastPlace.geometry.location.lng}`;
-    console.log(`  - Destination: ${destination} (coordinates - place_id invalid: ${lastPlace.place_id || 'missing'})`);
+    console.log(`  - Destination: ${destination} (coordinates)`);
   } else {
-    throw new Error('Невозможно построить маршрут - нет координат');
+    throw new Error('Невозможно построить маршрут - нет координат для последнего места');
   }
   
   url += `&destination=${destination}`;

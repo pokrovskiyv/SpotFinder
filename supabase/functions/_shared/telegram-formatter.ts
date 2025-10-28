@@ -118,28 +118,19 @@ export function createPlaceButtons(
   buttons.push(row1);
 
   // Second row: Directions button (URL button)
-  // Priority: place_id > maps_uri > coordinates
-  if (place.place_id && place.place_id.startsWith('ChIJ')) {
-    // Use place_id for most accurate navigation
-    const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=place_id:${place.place_id}`;
+  // Always use coordinates - most reliable method (place_id from Gemini often doesn't work)
+  if (place.geometry?.location) {
+    const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.geometry.location.lat},${place.geometry.location.lng}`;
     
     buttons.push([{
       text: BUTTONS.DIRECTIONS,
       url: directionsUrl,
     }]);
   } else if (place.maps_uri) {
-    // Use Maps URI from Grounding as fallback
+    // Fallback to Maps URI if no coordinates
     buttons.push([{
       text: BUTTONS.SHOW_ON_MAP,
       url: place.maps_uri,
-    }]);
-  } else if (place.geometry?.location) {
-    // Last fallback: use coordinates
-    const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.geometry.location.lat},${place.geometry.location.lng}`;
-    
-    buttons.push([{
-      text: BUTTONS.DIRECTIONS,
-      url: directionsUrl,
     }]);
   }
 
