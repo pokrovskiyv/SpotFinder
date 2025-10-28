@@ -290,6 +290,17 @@ export function extractPlaceCount(text: string): number | null {
 }
 
 /**
+ * Validate Google Place ID
+ * Place IDs should be at least 20 characters and match the expected pattern
+ */
+function isValidPlaceId(placeId: string | undefined): boolean {
+  if (!placeId) return false;
+  // Google Place ID should be at least 20 characters
+  // Usually starts with ChIJ and is 23-27 characters long
+  return placeId.length >= 20 && /^[A-Za-z0-9_-]+$/.test(placeId);
+}
+
+/**
  * Build Google Maps URL for multi-stop route
  * NOTE: We build URL manually to avoid URLSearchParams encoding issues with place_id:
  * place_id:ChIJ... must NOT be encoded (: should stay as :, not %3A)
@@ -308,22 +319,32 @@ export function buildMultiStopRouteUrl(
     throw new Error('Нужно минимум 2 места для маршрута');
   }
   
+  console.log(`Building route URL for ${selectedPlaces.length} places`);
+  
   // Build URL manually to avoid encoding issues with place_id:
   let url = 'https://www.google.com/maps/dir/?api=1';
   
   // Add origin if we have user location
   if (userLocation) {
     url += `&origin=${userLocation.lat},${userLocation.lon}`;
+    console.log(`  - Origin: ${userLocation.lat},${userLocation.lon}`);
   }
   
   // Build waypoints (all places except the last one)
   const waypoints: string[] = [];
   for (let i = 0; i < selectedPlaces.length - 1; i++) {
     const place = selectedPlaces[i];
-    if (place.place_id?.startsWith('ChIJ')) {
-      waypoints.push(`place_id:${place.place_id}`);
+    
+    if (isValidPlaceId(place.place_id)) {
+      const waypoint = `place_id:${place.place_id}`;
+      waypoints.push(waypoint);
+      console.log(`  - Waypoint ${i + 1}: ${waypoint} (valid)`);
     } else if (place.geometry?.location) {
-      waypoints.push(`${place.geometry.location.lat},${place.geometry.location.lng}`);
+      const waypoint = `${place.geometry.location.lat},${place.geometry.location.lng}`;
+      waypoints.push(waypoint);
+      console.log(`  - Waypoint ${i + 1}: ${waypoint} (coordinates - place_id invalid: ${place.place_id || 'missing'})`);
+    } else {
+      console.warn(`  - Waypoint ${i + 1}: skipped (no valid place_id or coordinates)`);
     }
   }
   
@@ -331,10 +352,12 @@ export function buildMultiStopRouteUrl(
   const lastPlace = selectedPlaces[selectedPlaces.length - 1];
   let destination: string;
   
-  if (lastPlace.place_id?.startsWith('ChIJ')) {
+  if (isValidPlaceId(lastPlace.place_id)) {
     destination = `place_id:${lastPlace.place_id}`;
+    console.log(`  - Destination: ${destination} (valid)`);
   } else if (lastPlace.geometry?.location) {
     destination = `${lastPlace.geometry.location.lat},${lastPlace.geometry.location.lng}`;
+    console.log(`  - Destination: ${destination} (coordinates - place_id invalid: ${lastPlace.place_id || 'missing'})`);
   } else {
     throw new Error('Невозможно построить маршрут - нет координат');
   }
@@ -348,6 +371,8 @@ export function buildMultiStopRouteUrl(
   
   // Set travel mode
   url += '&travelmode=walking';
+  
+  console.log(`Built route URL: ${url}`);
   
   return url;
 }

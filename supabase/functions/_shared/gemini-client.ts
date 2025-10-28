@@ -221,29 +221,50 @@ export class GeminiClient {
             // Extract place ID from different possible formats
             let placeId = chunk.maps.placeId;
             
-            // Try to extract from URI
-            if (!placeId && chunk.maps.uri) {
+            // Helper function to validate place_id
+            const isValidPlaceId = (id: string | undefined): boolean => {
+              if (!id) return false;
+              // Google Place ID should be at least 20 characters
+              // Usually starts with ChIJ and is 23-27 characters long
+              return id.length >= 20 && /^[A-Za-z0-9_-]+$/.test(id);
+            };
+            
+            // Try to extract from URI if placeId is missing or invalid
+            if (!isValidPlaceId(placeId) && chunk.maps.uri) {
               // Format 1: https://www.google.com/maps/place/?q=place_id:ChIJ...
-              const placeIdMatch1 = chunk.maps.uri.match(/place_id[:=]([A-Za-z0-9_-]+)/);
+              // Extract with length validation - stop at query params, slashes, or end of string
+              const placeIdMatch1 = chunk.maps.uri.match(/place_id[:=]([A-Za-z0-9_-]{20,})(?:[&?/\s]|$)/);
               // Format 2: https://maps.google.com/?cid=12345
               const placeIdMatch2 = chunk.maps.uri.match(/cid=([0-9]+)/);
-              // Format 3: Direct place ID in URL
-              const placeIdMatch3 = chunk.maps.uri.match(/ChIJ[A-Za-z0-9_-]+/);
+              // Format 3: Direct place ID in URL (ChIJ followed by alphanumeric characters)
+              const placeIdMatch3 = chunk.maps.uri.match(/ChIJ[A-Za-z0-9_-]{19,}(?:[&?/\s]|$)/);
               
-              placeId = placeIdMatch1?.[1] || placeIdMatch2?.[1] || placeIdMatch3?.[0];
+              const extractedId = placeIdMatch1?.[1] || placeIdMatch2?.[1] || placeIdMatch3?.[0];
+              
+              if (isValidPlaceId(extractedId)) {
+                placeId = extractedId;
+              }
             }
+            
+            // Validate final placeId before using
+            const validPlaceId = isValidPlaceId(placeId) ? placeId : undefined;
             
             // Create place result with Maps URI for fallback
             if (chunk.maps.title) {
               const place: PlaceResult = {
-                place_id: placeId || `maps_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                place_id: validPlaceId || `maps_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 name: chunk.maps.title,
                 address: chunk.maps.address,
                 // Store Maps URI for navigation fallback
                 maps_uri: chunk.maps.uri,
               };
               
-              console.log(`Extracted place: ${place.name}, place_id: ${place.place_id}, uri: ${place.maps_uri}`);
+              // Enhanced logging for debugging
+              console.log(`Extracted place: ${place.name}`);
+              console.log(`  - place_id: ${place.place_id} (valid: ${isValidPlaceId(place.place_id)})`);
+              console.log(`  - Original URI: ${chunk.maps.uri}`);
+              console.log(`  - Address: ${place.address || 'N/A'}`);
+              
               places.push(place);
             }
           }

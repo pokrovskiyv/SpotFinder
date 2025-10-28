@@ -730,8 +730,17 @@ export class Orchestrator {
       
       const userLocation = await this.sessionManager.getValidLocation(userId);
       
+      // Log places for debugging
+      console.log(`Building route with ${lastResults.length} places:`);
+      lastResults.forEach((place, idx) => {
+        console.log(`  Place ${idx + 1}: ${place.name}`);
+        console.log(`    - place_id: ${place.place_id || 'missing'} (length: ${place.place_id?.length || 0})`);
+        console.log(`    - has geometry: ${!!place.geometry?.location}`);
+      });
+      
       try {
         const routeUrl = buildMultiStopRouteUrl(userLocation, lastResults);
+        console.log(`Route URL created successfully: ${routeUrl.substring(0, 100)}...`);
         const messageText = formatRouteMessage(lastResults);
         
         await this.telegramClient.sendMessage({
@@ -889,8 +898,10 @@ export class Orchestrator {
         
         if (indices.length > 0) {
           // User specified specific places
+          console.log(`Building route for specific places: ${indices.join(', ')}`);
           try {
             const routeUrl = buildMultiStopRouteUrl(userLocation, lastResults, indices);
+            console.log(`Route URL created successfully: ${routeUrl.substring(0, 100)}...`);
             const messageText = formatRouteMessage(lastResults, indices);
             
             await this.telegramClient.sendMessage({
@@ -910,8 +921,16 @@ export class Orchestrator {
           }
         } else {
           // User wants route through all places
+          console.log(`Building route for all ${lastResults.length} places`);
+          // Log places for debugging
+          lastResults.forEach((place, idx) => {
+            console.log(`  Place ${idx + 1}: ${place.name}`);
+            console.log(`    - place_id: ${place.place_id || 'missing'} (length: ${place.place_id?.length || 0})`);
+            console.log(`    - has geometry: ${!!place.geometry?.location}`);
+          });
           try {
             const routeUrl = buildMultiStopRouteUrl(userLocation, lastResults);
+            console.log(`Route URL created successfully: ${routeUrl.substring(0, 100)}...`);
             const messageText = formatRouteMessage(lastResults);
             
             await this.telegramClient.sendMessage({
