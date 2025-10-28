@@ -32,7 +32,17 @@ Write-Host ""
 Write-Host "🗑️  Deleting old webhook..." -ForegroundColor Yellow
 try {
     $deleteResponse = Invoke-RestMethod -Uri "https://api.telegram.org/bot$BotToken/deleteWebhook"
-    Write-Host "✅ Old webhook deleted" -ForegroundColor Green
+    
+    if ($deleteResponse.ok) {
+        Write-Host "✅ Old webhook deleted successfully" -ForegroundColor Green
+        if ($deleteResponse.result -eq $true) {
+            Write-Host "   Webhook was active and has been removed" -ForegroundColor Gray
+        } else {
+            Write-Host "   No active webhook found to delete" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "⚠️  Webhook deletion returned unexpected status" -ForegroundColor Yellow
+    }
 } catch {
     Write-Host "⚠️  Could not delete old webhook (may not exist)" -ForegroundColor Yellow
 }

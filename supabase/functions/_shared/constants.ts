@@ -26,6 +26,9 @@ export const GEMINI_MAX_TOKENS = 2048;
 // Google Maps constants
 export const MAPS_API_BASE = 'https://maps.googleapis.com/maps/api';
 
+// New Google Places API (New) constants
+export const NEW_PLACES_API_BASE = 'https://places.googleapis.com/v1';
+
 // MVP Category limitations
 export const ALLOWED_CATEGORIES = [
   'food', // Еда (кафе, рестораны)

@@ -362,6 +362,68 @@ export function hasValidPlaceId(placeId: string | undefined): boolean {
 }
 
 /**
+ * Check if two places are duplicates based on place_id or coordinates
+ * Places are considered duplicates if:
+ * 1. They have the same valid place_id, OR
+ * 2. They have coordinates within ~50 meters of each other
+ */
+export function arePlacesDuplicate(
+  place1: { place_id?: string; geometry?: { location: { lat: number; lng: number } } },
+  place2: { place_id?: string; geometry?: { location: { lat: number; lng: number } } }
+): boolean {
+  // Check by place_id first (most reliable)
+  if (place1.place_id && place2.place_id && 
+      hasValidPlaceId(place1.place_id) && hasValidPlaceId(place2.place_id)) {
+    if (place1.place_id === place2.place_id) {
+      return true;
+    }
+  }
+  
+  // Check by coordinates (within ~50m)
+  if (place1.geometry?.location && place2.geometry?.location) {
+    const distance = calculateDistance(
+      { lat: place1.geometry.location.lat, lon: place1.geometry.location.lng },
+      { lat: place2.geometry.location.lat, lon: place2.geometry.location.lng }
+    );
+    // 50 meters threshold - same location
+    if (distance < 50) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Filter out duplicate places from an array
+ * Keeps the first occurrence of each unique place
+ */
+export function deduplicatePlaces<T extends { place_id?: string; geometry?: { location: { lat: number; lng: number } } }>(
+  places: T[]
+): T[] {
+  const unique: T[] = [];
+  
+  for (const place of places) {
+    const isDuplicate = unique.some(existing => arePlacesDuplicate(existing, place));
+    if (!isDuplicate) {
+      unique.push(place);
+    }
+  }
+  
+  return unique;
+}
+
+/**
+ * Check if a place is in the shown places list by place_id or coordinates
+ */
+export function isPlaceShown(
+  place: { place_id?: string; geometry?: { location: { lat: number; lng: number } } },
+  shownPlaces: Array<{ place_id?: string; geometry?: { location: { lat: number; lng: number } } }>
+): boolean {
+  return shownPlaces.some(shown => arePlacesDuplicate(place, shown));
+}
+
+/**
  * Build Google Maps URL for multi-stop route
  * NOTE: We build URL manually to avoid URLSearchParams encoding issues with place_id:
  * place_id:ChIJ... must NOT be encoded (: should stay as :, not %3A)

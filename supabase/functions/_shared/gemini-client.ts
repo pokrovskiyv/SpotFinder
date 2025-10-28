@@ -1,7 +1,7 @@
 // Gemini API Client - handles communication with Google Gemini API
 
 import { GeminiRequest, GeminiResponse, Location, PlaceResult, PlaceReview, GroundingMetadata, GroundingChunk, QuotaExceededError } from './types.ts';
-import { GEMINI_API_BASE, GEMINI_MODEL, DEFAULT_SEARCH_RADIUS, MAX_SEARCH_RADIUS, MAPS_API_BASE, MIN_RESULTS_THRESHOLD, SEARCH_RADIUS_STEPS } from './constants.ts';
+import { GEMINI_API_BASE, GEMINI_MODEL, DEFAULT_SEARCH_RADIUS, MAX_SEARCH_RADIUS, MAPS_API_BASE, MIN_RESULTS_THRESHOLD, SEARCH_RADIUS_STEPS, NEW_PLACES_API_BASE } from './constants.ts';
 import { getTimeContext } from './utils.ts';
 import { buildContextualPrompt } from './prompts/system-prompts.ts';
 import { calculateDistance, filterAndSort, deduplicatePlaces } from './geo-utils.ts';
@@ -386,7 +386,7 @@ export class GeminiClient {
 
   /**
    * Smart search places with adaptive radius and geographic filtering
-   * Uses combination of Nearby Search and Text Search for optimal results
+   * Uses NEW Places API (New) for better accuracy
    */
   async searchPlaces(
     query: string,
@@ -395,44 +395,29 @@ export class GeminiClient {
     maxResults = 20, // Increased from 5 to 20 for caching
     excludePlaceIds: string[] = [] // Place IDs to exclude from results
   ): Promise<PlaceResult[]> {
-    // Try Nearby Search first (strict radius)
+    // Try NEW Nearby Search first (strict radius)
     try {
-      const nearbyResults = await this.nearbySearch(query, location, initialRadius);
+      const nearbyResults = await this.searchNearbyNew(query, location, initialRadius);
       if (nearbyResults.length >= MIN_RESULTS_THRESHOLD) {
-        console.log(`Found ${nearbyResults.length} places with Nearby Search`);
+        console.log(`Found ${nearbyResults.length} places with NEW Nearby Search`);
         const filtered = filterAndSort(nearbyResults, location, MAX_SEARCH_RADIUS);
         // Exclude already shown places
         const notShown = filtered.filter(p => p.place_id && !excludePlaceIds.includes(p.place_id));
         return notShown.slice(0, maxResults);
       }
     } catch (error) {
-      console.log('Nearby Search failed, falling back to Text Search:', error);
+      console.log('NEW Nearby Search failed, falling back to NEW Text Search:', error);
     }
 
-    // Fallback to Text Search with expanding radius
+    // Fallback to NEW Text Search with expanding radius
     let allResults: PlaceResult[] = [];
     
     for (const radius of SEARCH_RADIUS_STEPS) {
       try {
-        const textResults = await this.textSearch(query, location, radius);
+        const textResults = await this.searchTextNew(query, location, radius);
         
-        // Calculate distances for all results
-        const resultsWithDistance = textResults.map(place => {
-          let distance = place.distance;
-          
-          // Calculate distance if not already set
-          if (distance === undefined && place.geometry?.location) {
-            distance = calculateDistance(location, {
-              lat: place.geometry.location.lat,
-              lon: place.geometry.location.lng,
-            });
-          }
-          
-          // Ensure geometry is preserved
-          return { ...place, distance, geometry: place.geometry };
-        });
-        
-        allResults = [...allResults, ...resultsWithDistance];
+        // Results already have distance calculated in transformNewPlaceToOld
+        allResults = [...allResults, ...textResults];
         
         // Deduplicate before filtering
         allResults = deduplicatePlaces(allResults);
@@ -444,11 +429,28 @@ export class GeminiClient {
         const notShown = filtered.filter(p => p.place_id && !excludePlaceIds.includes(p.place_id));
         
         if (notShown.length >= maxResults) {
-          console.log(`Found ${notShown.length} places with Text Search at radius ${radius}m`);
+          console.log(`Found ${notShown.length} places with NEW Text Search at radius ${radius}m`);
           return notShown.slice(0, maxResults);
         }
       } catch (error) {
-        console.log(`Text Search failed for radius ${radius}:`, error);
+        console.log(`NEW Text Search failed for radius ${radius}:`, error);
+        // Fallback to old API if new API fails
+        try {
+          const oldTextResults = await this.textSearch(query, location, radius);
+          const resultsWithDistance = oldTextResults.map(place => {
+            let distance = place.distance;
+            if (distance === undefined && place.geometry?.location) {
+              distance = calculateDistance(location, {
+                lat: place.geometry.location.lat,
+                lon: place.geometry.location.lng,
+              });
+            }
+            return { ...place, distance, geometry: place.geometry };
+          });
+          allResults = [...allResults, ...resultsWithDistance];
+        } catch (oldError) {
+          console.log(`Old Text Search also failed for radius ${radius}:`, oldError);
+        }
       }
     }
 
@@ -654,58 +656,94 @@ export class GeminiClient {
 
   /**
    * Try to resolve valid place_id from Grounding data
-   * Uses Text Search and Nearby Search to find the actual place
+   * Uses NEW Places API (New) for better accuracy
    */
   async resolvePlaceId(name: string, address?: string, mapsUri?: string): Promise<string | null> {
     console.log(`Resolving place_id for: "${name}", address: "${address}", uri: "${mapsUri}"`);
     
-    // 1. Try Text Search by name and address
-    if (name && address) {
-      const query = `${name} ${address}`;
-      console.log(`Trying Text Search with query: "${query}"`);
-      
-      try {
-        const textResults = await this.textSearchSimple(query);
-        if (textResults[0]?.place_id) {
-          console.log(`✓ Found place_id via Text Search: ${textResults[0].place_id}`);
-          return textResults[0].place_id;
-        }
-      } catch (error) {
-        console.error('Text Search failed:', error);
-      }
-    }
-    
-    // 2. Try to extract coordinates from maps_uri and use Nearby Search
+    // Determine location for search (from URI or default)
+    let searchLocation: Location = { lat: 0, lon: 0 };
     if (mapsUri) {
       const coords = this.extractCoordsFromUri(mapsUri);
       if (coords) {
+        searchLocation = coords;
         console.log(`Extracted coords from URI: ${coords.lat}, ${coords.lon}`);
-        console.log(`Trying Nearby Search with name: "${name}"`);
-        
-        try {
-          const nearbyResults = await this.nearbySearchSimple(name, coords);
-          if (nearbyResults[0]?.place_id) {
-            console.log(`✓ Found place_id via Nearby Search: ${nearbyResults[0].place_id}`);
-            return nearbyResults[0].place_id;
-          }
-        } catch (error) {
-          console.error('Nearby Search failed:', error);
-        }
       }
     }
     
-    // 3. Last resort: try Text Search with just the name
-    if (name) {
-      console.log(`Last resort: Text Search with name only: "${name}"`);
+    // 1. Try NEW Text Search by name and address
+    if (name && address) {
+      const query = `${name} ${address}`;
+      console.log(`Trying NEW Text Search with query: "${query}"`);
       
       try {
-        const textResults = await this.textSearchSimple(name);
+        const textResults = await this.searchTextNew(query, searchLocation, 1000);
         if (textResults[0]?.place_id) {
-          console.log(`✓ Found place_id via Text Search (name only): ${textResults[0].place_id}`);
+          console.log(`✓ Found place_id via NEW Text Search: ${textResults[0].place_id}`);
           return textResults[0].place_id;
         }
       } catch (error) {
-        console.error('Text Search (name only) failed:', error);
+        console.error('NEW Text Search failed:', error);
+      }
+    }
+    
+    // 2. Try NEW Nearby Search if we have coordinates
+    if (searchLocation.lat !== 0 || searchLocation.lon !== 0) {
+      console.log(`Trying NEW Nearby Search with name: "${name}"`);
+      
+      try {
+        const nearbyResults = await this.searchNearbyNew(name, searchLocation, 100);
+        if (nearbyResults[0]?.place_id) {
+          console.log(`✓ Found place_id via NEW Nearby Search: ${nearbyResults[0].place_id}`);
+          return nearbyResults[0].place_id;
+        }
+      } catch (error) {
+        console.error('NEW Nearby Search failed:', error);
+      }
+    }
+    
+    // 3. Last resort: try NEW Text Search with just the name
+    if (name) {
+      console.log(`Last resort: NEW Text Search with name only: "${name}"`);
+      
+      try {
+        const textResults = await this.searchTextNew(name, searchLocation, 5000);
+        if (textResults[0]?.place_id) {
+          console.log(`✓ Found place_id via NEW Text Search (name only): ${textResults[0].place_id}`);
+          return textResults[0].place_id;
+        }
+      } catch (error) {
+        console.error('NEW Text Search (name only) failed:', error);
+      }
+    }
+    
+    // Fallback to old API methods
+    console.log('Trying old API methods as fallback...');
+    
+    // 4. Try old Text Search
+    if (name && address) {
+      try {
+        const query = `${name} ${address}`;
+        const textResults = await this.textSearchSimple(query);
+        if (textResults[0]?.place_id) {
+          console.log(`✓ Found place_id via old Text Search: ${textResults[0].place_id}`);
+          return textResults[0].place_id;
+        }
+      } catch (error) {
+        console.error('Old Text Search failed:', error);
+      }
+    }
+    
+    // 5. Try old Nearby Search
+    if (searchLocation.lat !== 0 || searchLocation.lon !== 0) {
+      try {
+        const nearbyResults = await this.nearbySearchSimple(name, searchLocation);
+        if (nearbyResults[0]?.place_id) {
+          console.log(`✓ Found place_id via old Nearby Search: ${nearbyResults[0].place_id}`);
+          return nearbyResults[0].place_id;
+        }
+      } catch (error) {
+        console.error('Old Nearby Search failed:', error);
       }
     }
     
@@ -1052,7 +1090,7 @@ export class GeminiClient {
   }
 
   /**
-   * Fallback search using Google Places API Nearby Search
+   * Fallback search using NEW Google Places API (New)
    * Used when Gemini doesn't return any places
    */
   async searchNearbyPlaces(
@@ -1062,56 +1100,77 @@ export class GeminiClient {
     radius: number = 5000
   ): Promise<PlaceResult[]> {
     try {
-      // Determine place type from query
-      const type = this.inferPlaceType(query);
+      console.log(`Fallback to NEW Places API: query="${query}", radius=${radius}m`);
       
-      const url = `${MAPS_API_BASE}/place/nearbysearch/json?` +
-        `location=${location.lat},${location.lon}` +
-        `&radius=${radius}` +
-        (type ? `&type=${type}` : '') +
-        `&key=${this.mapsApiKey}` +
-        `&language=ru`;
+      // Try NEW Text Search first (better for text queries like "чайная")
+      const textResults = await this.searchTextNew(query, location, radius);
       
-      console.log(`Fallback to Places API: type=${type}, radius=${radius}m`);
-      
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Places API error: ${response.status}`);
+      if (textResults.length > 0) {
+        console.log(`NEW Text Search found ${textResults.length} places`);
+        return textResults.slice(0, maxResults);
       }
       
-      const data = await response.json();
+      // Fallback to NEW Nearby Search if text search returns nothing
+      const nearbyResults = await this.searchNearbyNew(query, location, radius);
       
-      if (data.status !== 'OK' || !data.results || data.results.length === 0) {
-        console.log(`Places API returned no results: ${data.status}`);
-        return [];
+      if (nearbyResults.length > 0) {
+        console.log(`NEW Nearby Search found ${nearbyResults.length} places`);
+        return nearbyResults.slice(0, maxResults);
       }
       
-      // Convert to PlaceResult format
-      const places: PlaceResult[] = data.results.slice(0, maxResults).map((result: any) => ({
-        place_id: result.place_id,
-        name: result.name,
-        address: result.vicinity,
-        rating: result.rating,
-        is_open: result.opening_hours?.open_now,
-        geometry: {
-          location: {
-            lat: result.geometry.location.lat,
-            lng: result.geometry.location.lng,
-          },
-        },
-        types: result.types || [],
-        distance: this.calculateDistanceInternal(location, {
-          lat: result.geometry.location.lat,
-          lon: result.geometry.location.lng,
-        }),
-      }));
-      
-      console.log(`Places API found ${places.length} places`);
-      return places;
+      console.log(`NEW Places API returned no results`);
+      return [];
       
     } catch (error) {
-      console.error('Places API fallback failed:', error);
-      return [];
+      console.error('NEW Places API fallback failed, trying old API:', error);
+      
+      // Fallback to old API if new API fails
+      try {
+        const type = this.inferPlaceType(query);
+        const url = `${MAPS_API_BASE}/place/nearbysearch/json?` +
+          `location=${location.lat},${location.lon}` +
+          `&radius=${radius}` +
+          (type ? `&type=${type}` : '') +
+          `&key=${this.mapsApiKey}` +
+          `&language=ru`;
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Old Places API error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.status !== 'OK' || !data.results || data.results.length === 0) {
+          return [];
+        }
+        
+        // Convert to PlaceResult format
+        const places: PlaceResult[] = data.results.slice(0, maxResults).map((result: any) => ({
+          place_id: result.place_id,
+          name: result.name,
+          address: result.vicinity,
+          rating: result.rating,
+          is_open: result.opening_hours?.open_now,
+          geometry: {
+            location: {
+              lat: result.geometry.location.lat,
+              lng: result.geometry.location.lng,
+            },
+          },
+          types: result.types || [],
+          distance: this.calculateDistanceInternal(location, {
+            lat: result.geometry.location.lat,
+            lon: result.geometry.location.lng,
+          }),
+        }));
+        
+        console.log(`Old Places API found ${places.length} places`);
+        return places;
+      } catch (oldError) {
+        console.error('Old Places API fallback also failed:', oldError);
+        return [];
+      }
     }
   }
 
@@ -1164,6 +1223,319 @@ export class GeminiClient {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return Math.round(R * c);
+  }
+
+  // ============================================
+  // NEW GOOGLE PLACES API (NEW) METHODS
+  // ============================================
+
+  /**
+   * Transform new Places API response to old PlaceResult format
+   */
+  private transformNewPlaceToOld(place: any, location: Location): PlaceResult {
+    // Extract photo_reference from photo name if available
+    const photos = place.photos?.map((photo: any) => {
+      // Extract photo_id from photo.name format: places/{place_id}/photos/{photo_id}
+      let photo_reference = photo.name;
+      if (photo.name && photo.name.includes('/photos/')) {
+        // Try to extract photo_id for old API compatibility
+        const parts = photo.name.split('/photos/');
+        if (parts.length > 1) {
+          photo_reference = parts[1];
+        }
+      }
+      return {
+        photo_reference: photo_reference,
+        width: photo.widthPx || 800,
+        height: photo.heightPx || 600,
+      };
+    });
+
+    // Transform reviews if available
+    const reviews = place.reviews?.map((review: any) => ({
+      author_name: review.authorAttribution?.displayName || 'Anonymous',
+      rating: review.rating || 0,
+      text: review.text?.text || '',
+      time: review.publishTime ? new Date(review.publishTime).getTime() : Date.now(),
+    }));
+
+    // Extract place_id from name field (format: places/{place_id})
+    let place_id = place.id;
+    if (!place_id && place.name) {
+      const match = place.name.match(/places\/(.+)/);
+      if (match) {
+        place_id = match[1];
+      }
+    }
+
+    return {
+      place_id: place_id,
+      name: place.displayName?.text || 'Без названия',
+      address: place.formattedAddress || place.shortFormattedAddress,
+      rating: place.rating,
+      price_level: place.priceLevel === 'PRICE_LEVEL_FREE' ? 0 :
+                   place.priceLevel === 'PRICE_LEVEL_INEXPENSIVE' ? 1 :
+                   place.priceLevel === 'PRICE_LEVEL_MODERATE' ? 2 :
+                   place.priceLevel === 'PRICE_LEVEL_EXPENSIVE' ? 3 :
+                   place.priceLevel === 'PRICE_LEVEL_VERY_EXPENSIVE' ? 4 : undefined,
+      is_open: place.currentOpeningHours?.openNow,
+      geometry: place.location ? {
+        location: {
+          lat: place.location.latitude,
+          lng: place.location.longitude,
+        }
+      } : undefined,
+      types: place.types || [],
+      photos: photos,
+      reviews: reviews,
+      distance: place.location ? calculateDistance(location, {
+        lat: place.location.latitude,
+        lon: place.location.longitude,
+      }) : undefined,
+    };
+  }
+
+  /**
+   * Search nearby places using NEW Places API
+   */
+  private async searchNearbyNew(
+    query: string,
+    location: Location,
+    radius: number
+  ): Promise<PlaceResult[]> {
+    const url = `${NEW_PLACES_API_BASE}/places:searchNearby`;
+    
+    const types = this.inferPlaceTypes(query);
+    const payload: any = {
+      maxResultCount: 20,
+      locationRestriction: {
+        circle: {
+          center: {
+            latitude: location.lat,
+            longitude: location.lon,
+          },
+          radius: radius,
+        },
+      },
+      languageCode: 'ru',
+    };
+    
+    // Only include types if we have them
+    if (types.length > 0) {
+      payload.includedTypes = types;
+    }
+    
+    // Add textQuery if provided
+    if (query) {
+      payload.textQuery = query;
+    }
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': this.mapsApiKey,
+          'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types,places.currentOpeningHours',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('New Places API error:', response.status, errorText);
+        throw new Error(`New Places API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.places || data.places.length === 0) {
+        return [];
+      }
+
+      // Transform to old format
+      return data.places.map((place: any) => this.transformNewPlaceToOld(place, location));
+    } catch (error) {
+      console.error('New Nearby Search failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Text search using NEW Places API
+   */
+  private async searchTextNew(
+    query: string,
+    location: Location,
+    radius: number
+  ): Promise<PlaceResult[]> {
+    const url = `${NEW_PLACES_API_BASE}/places:searchText`;
+    
+    const payload = {
+      textQuery: query,
+      maxResultCount: 20,
+      locationBias: {
+        circle: {
+          center: {
+            latitude: location.lat,
+            longitude: location.lon,
+          },
+          radius: radius,
+        },
+      },
+      languageCode: 'ru',
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': this.mapsApiKey,
+          'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types,places.currentOpeningHours',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('New Text Search API error:', response.status, errorText);
+        throw new Error(`New Text Search API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.places || data.places.length === 0) {
+        return [];
+      }
+
+      // Transform to old format
+      return data.places.map((place: any) => this.transformNewPlaceToOld(place, location));
+    } catch (error) {
+      console.error('New Text Search failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get place details using NEW Places API
+   */
+  async getPlaceDetailsNew(placeId: string, includeReviews = false): Promise<PlaceResult> {
+    console.log(`getPlaceDetailsNew: placeId=${placeId}, includeReviews=${includeReviews}`);
+    
+    // Try cache first (only for non-review requests)
+    if (!includeReviews && this.cacheManager) {
+      const cached = await this.cacheManager.getCachedPlace(placeId);
+      if (cached) {
+        console.log(`✓ Using cached data for place ${placeId}`);
+        return cached;
+      }
+    }
+
+    const url = `${NEW_PLACES_API_BASE}/places/${placeId}`;
+    
+    // Build field mask
+    let fieldMask = 'id,name,displayName,formattedAddress,rating,priceLevel,currentOpeningHours,location,types';
+    if (includeReviews) {
+      fieldMask += ',reviews,photos';
+    }
+
+    try {
+      const response = await fetch(`${url}?languageCode=ru`, {
+        method: 'GET',
+        headers: {
+          'X-Goog-Api-Key': this.mapsApiKey,
+          'X-Goog-FieldMask': fieldMask,
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`New Places API HTTP error (${response.status}):`, errorText);
+        throw new Error(`New Places API HTTP error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data) {
+        throw new Error('No place data in response');
+      }
+
+      // Transform to old format (we don't have location for distance calculation here)
+      const place = this.transformNewPlaceToOld(data, { lat: 0, lon: 0 });
+      
+      // Process reviews if requested
+      if (includeReviews && place.reviews) {
+        try {
+          place.reviews = await this.processReviews(place.reviews);
+          console.log(`Processed ${place.reviews.length} reviews`);
+        } catch (reviewError) {
+          console.error('Failed to process reviews:', reviewError);
+          place.reviews = [];
+        }
+      }
+
+      // Cache the result (only for non-review requests)
+      if (!includeReviews && this.cacheManager) {
+        await this.cacheManager.cachePlace(place);
+      }
+
+      return place;
+    } catch (error) {
+      console.error('New getPlaceDetails failed:', error);
+      // Fallback to old API if new API fails
+      console.log('Falling back to old Places API...');
+      return await this.getPlaceDetails(placeId, includeReviews);
+    }
+  }
+
+  /**
+   * Get photo URL using NEW Places API
+   * Supports both new API format and old format for compatibility
+   */
+  getPhotoUrlNew(photoNameOrReference: string, maxWidth = 800): string {
+    // If it's a new API photo name (format: places/{place_id}/photos/{photo_id})
+    if (photoNameOrReference.includes('/photos/')) {
+      return `${NEW_PLACES_API_BASE}/${photoNameOrReference}/media?maxWidthPx=${maxWidth}&key=${this.mapsApiKey}`;
+    }
+    
+    // Fallback to old API format
+    return this.getPhotoUrl(photoNameOrReference, maxWidth);
+  }
+
+  /**
+   * Map query to Google Places types (New API format)
+   */
+  private inferPlaceTypes(query: string): string[] {
+    const lowerQuery = query.toLowerCase();
+    const types: string[] = [];
+    
+    // Food & Drinks
+    if (/кафе|coffee|кофе/.test(lowerQuery)) types.push('cafe');
+    if (/ресторан|restaurant|поесть|еда/.test(lowerQuery)) types.push('restaurant');
+    if (/бар|pub|паб/.test(lowerQuery)) types.push('bar');
+    
+    // Shopping
+    if (/магазин|shop|store/.test(lowerQuery)) types.push('store');
+    if (/супермаркет|supermarket/.test(lowerQuery)) types.push('supermarket');
+    
+    // Health
+    if (/аптек|pharmacy/.test(lowerQuery)) types.push('pharmacy');
+    if (/больниц|hospital/.test(lowerQuery)) types.push('hospital');
+    
+    // Finance
+    if (/банк|bank|атм|atm|банкомат/.test(lowerQuery)) types.push('atm', 'bank');
+    
+    // Entertainment & Tourism
+    if (/парк|park|погулять/.test(lowerQuery)) types.push('park');
+    if (/музей|museum/.test(lowerQuery)) types.push('museum');
+    if (/кино|cinema|movie/.test(lowerQuery)) types.push('movie_theater');
+    if (/маршрут|что посмотреть|достопримечательност|tourist|туристическ/.test(lowerQuery)) {
+      types.push('tourist_attraction');
+    }
+    
+    // Return empty array if no types found (will search all)
+    return types.length > 0 ? types : [];
   }
 }
 

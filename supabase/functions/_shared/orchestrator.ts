@@ -19,7 +19,7 @@ import {
 } from './telegram-formatter.ts';
 import { TelegramUpdate, PlaceResult, Location, QuotaExceededError, DBSession } from './types.ts';
 import { MESSAGES, DONATE_AMOUNTS } from './constants.ts';
-import { isFollowUpQuestion, extractOrdinal, extractMultipleOrdinals, extractCityFromQuery, isRouteRequest, extractPlaceIndices, buildMultiStopRouteUrl, isMultiPlaceRequest, extractPlaceCount } from './utils.ts';
+import { isFollowUpQuestion, extractOrdinal, extractMultipleOrdinals, extractCityFromQuery, isRouteRequest, extractPlaceIndices, buildMultiStopRouteUrl, isMultiPlaceRequest, extractPlaceCount, deduplicatePlaces, isPlaceShown } from './utils.ts';
 import { ContextHandler } from './context-handler.ts';
 import { extractFiltersFromQuery } from './filter-extractor.ts';
 import { sortAndFilterPlaces } from './places-sorter.ts';
@@ -308,6 +308,7 @@ export class Orchestrator {
 
       // Get list of shown places from session (resets when location updates)
       const shownPlaceIds = await this.sessionManager.getShownPlaceIds(userId);
+      const lastResults = await this.sessionManager.getLastResults(userId) || [];
       console.log(`Excluding ${shownPlaceIds.length} previously shown places from session`);
 
       // Get user preferences for context
@@ -427,7 +428,7 @@ export class Orchestrator {
           if (validPlaceId) {
             try {
               console.log(`✓ Getting full details for "${place.name}" (${validPlaceId})`);
-              const details = await this.geminiClient.getPlaceDetails(validPlaceId, true);
+              const details = await this.geminiClient.getPlaceDetailsNew(validPlaceId, true);
               // Merge with Grounding data, preserve maps_uri for fallback
               return { 
                 ...place, 
@@ -504,8 +505,16 @@ export class Orchestrator {
       }
 
       // Apply smart sorting and filtering based on extracted filters
-      const sortedPlaces = sortAndFilterPlaces(placesWithCoordinates, filters, searchLocation);
+      let sortedPlaces = sortAndFilterPlaces(placesWithCoordinates, filters, searchLocation);
       console.log(`After filtering and sorting: ${sortedPlaces.length} places`);
+
+      // Deduplicate places (remove duplicates by place_id and coordinates)
+      sortedPlaces = deduplicatePlaces(sortedPlaces);
+      console.log(`After deduplication: ${sortedPlaces.length} places`);
+
+      // Filter out already shown places using smart comparison
+      sortedPlaces = sortedPlaces.filter(place => !isPlaceShown(place, lastResults));
+      console.log(`After filtering shown places: ${sortedPlaces.length} places`);
 
       if (sortedPlaces.length === 0) {
         await this.telegramClient.sendMessage({
@@ -672,7 +681,7 @@ export class Orchestrator {
       let placeWithDetails = place;
       if (place.place_id && !place.place_id.startsWith('maps_')) {
         try {
-          placeWithDetails = await this.geminiClient.getPlaceDetails(place.place_id);
+          placeWithDetails = await this.geminiClient.getPlaceDetailsNew(place.place_id);
         } catch (error) {
           console.error(`Failed to get place details: ${error}`);
           // Continue with basic info
@@ -772,7 +781,7 @@ export class Orchestrator {
       
       try {
         console.log('Fetching place details with reviews...');
-        const details = await this.geminiClient.getPlaceDetails(placeId, true);
+        const details = await this.geminiClient.getPlaceDetailsNew(placeId, true);
         console.log(`Place details fetched: ${details.name}, reviews: ${details.reviews?.length || 0}, photos: ${details.photos?.length || 0}`);
         
         // Проверка: есть ли хоть что-то для отправки
@@ -794,7 +803,7 @@ export class Orchestrator {
             await this.telegramClient.sendPhotoGroup(
               chatId,
               details.photos,
-              (ref, maxWidth) => this.geminiClient.getPhotoUrl(ref, maxWidth)
+              (ref, maxWidth) => this.geminiClient.getPhotoUrlNew(ref, maxWidth)
             );
             console.log('Photos sent successfully');
           } catch (photoError) {
@@ -876,33 +885,54 @@ export class Orchestrator {
       const cached = await this.sessionManager.getNextCachedPlaces(userId, 5);
       
       if (cached && cached.places.length > 0) {
-        // We have cached places - show them
-        await this.sessionManager.updateCacheIndex(userId, cached.newIndex);
+        // We have cached places - deduplicate and filter already shown
+        const lastResults = await this.sessionManager.getLastResults(userId) || [];
         
-        // Save shown places to session history
-        const newPlaceIds = cached.places
-          .map(p => p.place_id)
-          .filter((id): id is string => id !== undefined);
-        if (newPlaceIds.length > 0) {
-          await this.sessionManager.addShownPlaceIds(userId, newPlaceIds);
+        // Deduplicate cached places
+        let uniquePlaces = deduplicatePlaces(cached.places);
+        
+        // Filter out places already shown
+        uniquePlaces = uniquePlaces.filter(place => !isPlaceShown(place, lastResults));
+        
+        console.log(`Pagination: ${cached.places.length} from cache -> ${uniquePlaces.length} after dedup and filtering`);
+        
+        // If no unique places left, treat as cache exhausted
+        if (uniquePlaces.length === 0) {
+          console.log('All cached places already shown, searching with expanded radius...');
+          // Fall through to expanded radius search below
+        } else {
+          // We have cached places - show them
+          await this.sessionManager.updateCacheIndex(userId, cached.newIndex);
+          
+          // Save shown places to session history
+          const newPlaceIds = uniquePlaces
+            .map(p => p.place_id)
+            .filter((id): id is string => id !== undefined);
+          if (newPlaceIds.length > 0) {
+            await this.sessionManager.addShownPlaceIds(userId, newPlaceIds);
+          }
+          
+          // Show cached places
+          const messageText = formatPlacesMessage(
+            uniquePlaces,
+            cached.hasMore ? '➡️ Следующие места:' : '➡️ Последние места в радиусе 5 км:'
+          );
+          
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: messageText,
+            parseMode: 'Markdown',
+            replyMarkup: this.telegramClient.createInlineKeyboard(
+              createPlaceButtons(uniquePlaces[0], 0)
+            ),
+          });
+          
+          return; // Exit early after showing cached places
         }
-        
-        // Show cached places
-        const messageText = formatPlacesMessage(
-          cached.places,
-          cached.hasMore ? '➡️ Следующие места:' : '➡️ Последние места в радиусе 5 км:'
-        );
-        
-        await this.telegramClient.sendMessage({
-          chatId,
-          text: messageText,
-          parseMode: 'Markdown',
-          replyMarkup: this.telegramClient.createInlineKeyboard(
-            createPlaceButtons(cached.places[0], 0)
-          ),
-        });
-        
-      } else {
+      }
+      
+      // Cache exhausted or no unique places - search with increased radius
+      {
         // Cache exhausted - search with increased radius
         const session = await this.sessionManager.getSession(userId);
         const lastQuery = session?.cache_query || session?.last_query;
@@ -918,8 +948,8 @@ export class Orchestrator {
         
         await this.telegramClient.sendTyping(chatId);
         
-        // Get shown places from session
-        const shownPlaceIds = await this.sessionManager.getShownPlaceIds(userId);
+        // Get shown places from session for smart filtering
+        const lastResults = await this.sessionManager.getLastResults(userId) || [];
         
         // Try increasing radius: 10km, then 20km
         const radiusSteps = [10000, 20000];
@@ -928,7 +958,7 @@ export class Orchestrator {
         
         for (const radius of radiusSteps) {
           try {
-            console.log(`Searching at radius ${radius}m with ${shownPlaceIds.length} excluded places`);
+            console.log(`Searching at radius ${radius}m, excluding ${lastResults.length} shown places`);
             const places = await this.geminiClient.searchNearbyPlaces(
               location,
               lastQuery,
@@ -936,10 +966,15 @@ export class Orchestrator {
               radius
             );
             
-            // Exclude already shown places
-            foundPlaces = places.filter(p => 
-              p.place_id && !shownPlaceIds.includes(p.place_id)
-            );
+            // Deduplicate new places
+            let uniquePlaces = deduplicatePlaces(places);
+            console.log(`  - Deduplication: ${places.length} -> ${uniquePlaces.length} places`);
+            
+            // Exclude already shown places using smart comparison
+            uniquePlaces = uniquePlaces.filter(place => !isPlaceShown(place, lastResults));
+            console.log(`  - After filtering shown: ${uniquePlaces.length} new places`);
+            
+            foundPlaces = uniquePlaces;
             
             if (foundPlaces.length > 0) {
               usedRadius = radius;
@@ -952,7 +987,7 @@ export class Orchestrator {
         }
         
         if (foundPlaces.length === 0) {
-          const totalShown = shownPlaceIds.length;
+          const totalShown = lastResults.length;
           const timeLeft = this.getLocationTimeLeft(session);
           await this.telegramClient.sendMessage({
             chatId,
@@ -980,7 +1015,7 @@ export class Orchestrator {
         }
         
         // Send with context about radius and count
-        const totalShown = shownPlaceIds.length + newPlaceIds.length;
+        const totalShown = lastResults.length + placesToShow.length;
         const messageText = formatPlacesMessage(
           placesToShow,
           `🔍 Нашёл ещё места в радиусе ${usedRadius / 1000} км!\n(всего показано: ${totalShown})`
@@ -997,7 +1032,7 @@ export class Orchestrator {
       }
     } else if (action === 'info') {
       // Get detailed info
-      const details = await this.geminiClient.getPlaceDetails(placeId);
+      const details = await this.geminiClient.getPlaceDetailsNew(placeId);
       
       await this.telegramClient.sendMessage({
         chatId,
@@ -1362,7 +1397,7 @@ export class Orchestrator {
           
           if (validPlaceId) {
             try {
-              const details = await this.geminiClient.getPlaceDetails(validPlaceId, false);
+              const details = await this.geminiClient.getPlaceDetailsNew(validPlaceId, false);
               return { 
                 ...place, 
                 ...details, 
