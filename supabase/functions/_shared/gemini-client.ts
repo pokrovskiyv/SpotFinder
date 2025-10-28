@@ -429,6 +429,7 @@ export class GeminiClient {
       price_level: place.price_level,
       is_open: place.opening_hours?.open_now,
       geometry: place.geometry, // Store geometry for directions
+      types: place.types || [],
       distance: calculateDistance(location, {
         lat: place.geometry.location.lat,
         lon: place.geometry.location.lng,
@@ -476,6 +477,7 @@ export class GeminiClient {
       price_level: place.price_level,
       is_open: place.opening_hours?.open_now,
       geometry: place.geometry, // Store geometry for directions
+      types: place.types || [],
     }));
   }
 
@@ -648,8 +650,8 @@ export class GeminiClient {
     const url = `https://maps.googleapis.com/maps/api/place/details/json`;
     
     const fields = includeReviews 
-      ? 'name,formatted_address,rating,price_level,opening_hours,geometry,formatted_phone_number,reviews,photos'
-      : 'name,formatted_address,rating,price_level,opening_hours,geometry,formatted_phone_number';
+      ? 'name,formatted_address,rating,price_level,opening_hours,geometry,formatted_phone_number,reviews,photos,types'
+      : 'name,formatted_address,rating,price_level,opening_hours,geometry,formatted_phone_number,types';
     
     const params = new URLSearchParams({
       place_id: placeId,
@@ -711,6 +713,7 @@ export class GeminiClient {
           lng: place.geometry.location.lng,
         }
       } : undefined,
+      types: place.types || [],
     };
 
     // Process reviews if requested AND available
@@ -965,6 +968,7 @@ export class GeminiClient {
             lng: result.geometry.location.lng,
           },
         },
+        types: result.types || [],
         distance: this.calculateDistanceInternal(location, {
           lat: result.geometry.location.lat,
           lon: result.geometry.location.lng,

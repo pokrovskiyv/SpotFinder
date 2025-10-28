@@ -412,8 +412,25 @@ export class Orchestrator {
         })
       );
 
-      // Keep all places that have at least a name
-      const validPlaces = placesWithDetails.filter(p => p.name && p.name !== 'Без названия');
+      // Filter out cities and keep only actual places
+      const validPlaces = placesWithDetails.filter(p => {
+        // Must have name
+        if (!p.name || p.name === 'Без названия') return false;
+        
+        // Filter out cities - check if types include locality/political without specific place type
+        if (p.types && Array.isArray(p.types)) {
+          const hasLocalityType = p.types.includes('locality') || p.types.includes('political');
+          const hasSpecificType = p.types.some(t => !['locality', 'political', 'geocode'].includes(t));
+          
+          // Exclude if it's ONLY a locality/political entity without specific place type
+          if (hasLocalityType && !hasSpecificType) {
+            console.log(`Filtering out city: "${p.name}" (types: ${p.types.join(', ')})`);
+            return false;
+          }
+        }
+        
+        return true;
+      });
 
       // Filter out places without coordinates (can't build routes without them)
       const placesWithCoordinates = validPlaces.filter(p => {
@@ -1043,7 +1060,25 @@ export class Orchestrator {
         })
       );
 
-      const validPlaces = placesWithDetails.filter(p => p.name && p.name !== 'Без названия');
+      // Filter out cities and keep only actual places
+      const validPlaces = placesWithDetails.filter(p => {
+        // Must have name
+        if (!p.name || p.name === 'Без названия') return false;
+        
+        // Filter out cities - check if types include locality/political without specific place type
+        if (p.types && Array.isArray(p.types)) {
+          const hasLocalityType = p.types.includes('locality') || p.types.includes('political');
+          const hasSpecificType = p.types.some(t => !['locality', 'political', 'geocode'].includes(t));
+          
+          // Exclude if it's ONLY a locality/political entity without specific place type
+          if (hasLocalityType && !hasSpecificType) {
+            console.log(`Filtering out city from multi-place search: "${p.name}" (types: ${p.types.join(', ')})`);
+            return false;
+          }
+        }
+        
+        return true;
+      });
 
       // Filter out places without coordinates (can't build routes without them)
       const placesWithCoordinates = validPlaces.filter(p => {

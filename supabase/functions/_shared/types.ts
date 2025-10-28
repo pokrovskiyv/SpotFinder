@@ -97,6 +97,7 @@ export interface PlaceResult {
   reviews?: PlaceReview[];
   photos?: PlacePhoto[];
   maps_uri?: string; // Google Maps URI from Grounding for fallback navigation
+  types?: string[]; // Google Places types (e.g., ['restaurant', 'food'], ['locality', 'political'])
 }
 
 export interface PlaceReview {

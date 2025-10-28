@@ -118,16 +118,23 @@ export function createPlaceButtons(
   buttons.push(row1);
 
   // Second row: Directions button (URL button)
-  // For individual places: use place_id if available (shows full place card)
-  if (hasValidPlaceId(place.place_id)) {
-    // Use correct place_id format - shows full place card with reviews, hours, etc.
+  // Use hybrid format: coordinates with place_id hint for best results
+  if (hasValidPlaceId(place.place_id) && place.geometry?.location) {
+    // Hybrid: coordinates + place_id - shows place card AND allows navigation
+    const directionsUrl = `https://www.google.com/maps/search/?api=1&query=${place.geometry.location.lat},${place.geometry.location.lng}&query_place_id=${place.place_id}`;
+    buttons.push([{
+      text: BUTTONS.DIRECTIONS,
+      url: directionsUrl,
+    }]);
+  } else if (hasValidPlaceId(place.place_id)) {
+    // place_id only format - shows full place card
     const directionsUrl = `https://www.google.com/maps/place/?q=place_id:${place.place_id}`;
     buttons.push([{
       text: BUTTONS.DIRECTIONS,
       url: directionsUrl,
     }]);
   } else if (place.geometry?.location) {
-    // Fallback to coordinates if no valid place_id
+    // Fallback to coordinates only if no valid place_id
     const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.geometry.location.lat},${place.geometry.location.lng}`;
     buttons.push([{
       text: BUTTONS.DIRECTIONS,
