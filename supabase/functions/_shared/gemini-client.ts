@@ -442,7 +442,7 @@ export class GeminiClient {
   /**
    * Main search method using only NEW Places API
    * NO GEMINI GROUNDING - Direct Places API search
-   * Uses smart selection between Nearby and Text Search based on query type
+   * Simplified: uses Text Search API for all queries, passing user query directly
    */
   async searchPlacesNew(
     query: string,
@@ -451,44 +451,16 @@ export class GeminiClient {
     maxResults = 20,
     excludePlaceIds: string[] = []
   ): Promise<PlaceResult[]> {
-    console.log(`🔍 Searching with NEW Places API: type=${searchType}, query="${query}"`);
+    console.log(`🔍 Direct search: "${query}"`);
     
-    let places: PlaceResult[] = [];
+    // Просто используем Text Search для всех запросов
+    const places = await this.searchTextNew(query, location, MAX_SEARCH_RADIUS);
     
-    if (searchType === 'nearby') {
-      // Strict radius search (5km) for "ближайший" queries
-      console.log('Using Nearby Search (strict 5km radius)');
-      places = await this.searchNearbyNew(query, location, MAX_SEARCH_RADIUS);
-    } else if (searchType === 'specific_place') {
-      // Wider search (50km) for specific place names like "Seal Tea в Нови Саде"
-      console.log('Using Text Search (wider 50km radius for specific place)');
-      places = await this.searchTextNew(query, location, 50000);
-    } else {
-      // General search: try Nearby first, then Text Search
-      console.log('Using General Search (Nearby then Text)');
-      
-      // Try Nearby Search first with strict radius
-      places = await this.searchNearbyNew(query, location, MAX_SEARCH_RADIUS);
-      
-      // If not enough results, expand with Text Search
-      if (places.length < MIN_RESULTS_THRESHOLD) {
-        console.log(`Nearby Search found only ${places.length} places, trying Text Search...`);
-        const textResults = await this.searchTextNew(query, location, 50000);
-        places = [...places, ...textResults];
-      }
-    }
+    console.log(`Text Search returned ${places.length} places`);
     
-    // Filter by distance (ensure all within MAX_SEARCH_RADIUS)
-    const filtered = places.filter(place => {
-      if (place.distance === undefined) return false;
-      return place.distance <= MAX_SEARCH_RADIUS;
-    });
-    
-    // Deduplicate and sort
-    const deduplicated = deduplicatePlaces(filtered);
+    // Минимальная обработка: дедупликация и исключение показанных
+    const deduplicated = deduplicatePlaces(places);
     const sorted = deduplicated.sort((a, b) => (a.distance || 0) - (b.distance || 0));
-    
-    // Exclude already shown places
     const notShown = sorted.filter(p => p.place_id && !excludePlaceIds.includes(p.place_id));
     
     console.log(`Found ${notShown.length} places after filtering (from ${places.length} raw results)`);
@@ -1495,6 +1467,9 @@ export class GeminiClient {
       },
       languageCode: 'ru',
     };
+
+    // Log payload for debugging
+    console.log('searchTextNew payload:', JSON.stringify(payload, null, 2));
 
     try {
       const response = await fetch(url, {
