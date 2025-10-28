@@ -1437,10 +1437,8 @@ export class GeminiClient {
       payload.includedTypes = types;
     }
     
-    // Add textQuery if provided
-    if (query) {
-      payload.textQuery = query;
-    }
+    // Log payload for debugging
+    console.log('searchNearbyNew payload:', JSON.stringify(payload, null, 2));
 
     try {
       const response = await fetch(url, {
