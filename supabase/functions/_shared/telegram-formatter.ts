@@ -56,26 +56,43 @@ export function formatPlacesMessage(
   const place = places[0];
   let message = introText ? `${introText}\n\n` : '🔍 Вот что я нашел:\n\n';
 
+  // Add editorial summary if available
+  if (place.editorial_summary) {
+    message += `📝 ${truncateText(place.editorial_summary, 100)}\n\n`;
+  }
+
   message += `**${place.name}**\n`;
 
   if (place.rating) {
     message += `⭐ ${place.rating.toFixed(1)}`;
   }
 
-  if (place.price_level) {
-    message += ` • ${getPriceLevel(place.price_level)}`;
+  if (place.price_level !== undefined) {
+    message += place.rating ? ` • ${getPriceLevel(place.price_level)}` : `${getPriceLevel(place.price_level)}`;
   }
 
   if (place.distance) {
-    message += ` • ${formatDistance(place.distance)}`;
+    message += (place.rating || place.price_level !== undefined) 
+      ? ` • ${formatDistance(place.distance)}`
+      : formatDistance(place.distance);
   }
 
   if (place.is_open !== undefined) {
-    message += place.is_open ? ' • ✅ Открыто' : ' • ❌ Закрыто';
+    message += (place.rating || place.price_level !== undefined || place.distance)
+      ? ` • ${place.is_open ? '✅ Открыто' : '❌ Закрыто'}`
+      : `${place.is_open ? '✅ Открыто' : '❌ Закрыто'}`;
   }
 
   if (place.address) {
     message += `\n📍 ${truncateText(place.address, 100)}`;
+  }
+
+  if (place.phone_number) {
+    message += `\n📞 ${place.phone_number}`;
+  }
+
+  if (place.website) {
+    message += `\n🌐 [Сайт](${place.website})`;
   }
 
   // Show notice if details are incomplete
@@ -177,10 +194,25 @@ export function createPlacesListButtons(places: PlaceResult[]): InlineButton[][]
  * Format single place details
  */
 export function formatPlaceDetails(place: PlaceResult): string {
-  let message = `📍 **${place.name}**\n\n`;
+  let message = '';
+
+  // Add editorial summary at the start if available
+  if (place.editorial_summary) {
+    message += `📝 ${place.editorial_summary}\n\n`;
+  }
+
+  message += `📍 **${place.name}**\n\n`;
 
   if (place.address) {
     message += `🏠 Адрес: ${place.address}\n`;
+  }
+
+  if (place.phone_number) {
+    message += `📞 Телефон: ${place.phone_number}\n`;
+  }
+
+  if (place.website) {
+    message += `🌐 [Сайт](${place.website})\n`;
   }
 
   if (place.rating) {
@@ -199,7 +231,7 @@ export function formatPlaceDetails(place: PlaceResult): string {
     message += place.is_open ? '✅ Открыто сейчас\n' : '❌ Закрыто\n';
   }
 
-  return message;
+  return message.trim();
 }
 
 /**

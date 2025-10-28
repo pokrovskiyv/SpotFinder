@@ -295,5 +295,47 @@ export class TelegramClient {
       body: JSON.stringify(payload),
     });
   }
+
+  /**
+   * Send photo with caption
+   */
+  async sendPhoto(options: {
+    chatId: number;
+    photo: string; // URL or file_id
+    caption?: string;
+    replyMarkup?: unknown;
+    parseMode?: 'Markdown' | 'HTML';
+  }): Promise<void> {
+    const { chatId, photo, caption, replyMarkup, parseMode } = options;
+
+    const payload: Record<string, unknown> = {
+      chat_id: chatId,
+      photo,
+    };
+
+    if (caption) {
+      payload.caption = truncateText(caption, 1024); // Max caption length
+    }
+
+    if (parseMode) {
+      payload.parse_mode = parseMode;
+    }
+
+    if (replyMarkup) {
+      payload.reply_markup = replyMarkup;
+    }
+
+    const response = await fetch(`${this.apiBase}/sendPhoto`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('Failed to send photo:', error);
+      // Don't throw - fallback to text message if photo fails
+    }
+  }
 }
 

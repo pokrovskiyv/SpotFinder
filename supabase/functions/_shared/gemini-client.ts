@@ -850,8 +850,8 @@ export class GeminiClient {
     const url = `https://maps.googleapis.com/maps/api/place/details/json`;
     
     const fields = includeReviews 
-      ? 'name,formatted_address,rating,price_level,opening_hours,geometry,formatted_phone_number,reviews,photos,types'
-      : 'name,formatted_address,rating,price_level,opening_hours,geometry,formatted_phone_number,types';
+      ? 'name,formatted_address,rating,price_level,opening_hours,geometry,formatted_phone_number,website,editorial_summary,reviews,photos,types'
+      : 'name,formatted_address,rating,price_level,opening_hours,geometry,formatted_phone_number,website,editorial_summary,types';
     
     const params = new URLSearchParams({
       place_id: placeId,
@@ -914,6 +914,9 @@ export class GeminiClient {
         }
       } : undefined,
       types: place.types || [],
+      phone_number: place.formatted_phone_number,
+      website: place.website,
+      editorial_summary: place.editorial_summary?.overview,
     };
 
     // Process reviews if requested AND available
@@ -1378,6 +1381,9 @@ export class GeminiClient {
       types: place.types || [],
       photos: photos,
       reviews: reviews,
+      phone_number: place.nationalPhoneNumber || place.internationalPhoneNumber,
+      website: place.websiteUri,
+      editorial_summary: place.editorialSummary?.text || place.editorialSummary?.overview,
       distance: place.location ? calculateDistance(location, {
         lat: place.location.latitude,
         lon: place.location.longitude,
@@ -1426,7 +1432,7 @@ export class GeminiClient {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': this.mapsApiKey,
-          'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types,places.currentOpeningHours',
+          'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types,places.currentOpeningHours,places.phoneNumber,places.websiteUri,places.editorialSummary,places.photos',
         },
         body: JSON.stringify(payload),
       });
@@ -1489,7 +1495,7 @@ export class GeminiClient {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': this.mapsApiKey,
-          'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types,places.currentOpeningHours',
+          'X-Goog-FieldMask': 'places.id,places.name,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types,places.currentOpeningHours,places.phoneNumber,places.websiteUri,places.editorialSummary,places.photos',
         },
         body: JSON.stringify(payload),
       });
@@ -1532,7 +1538,7 @@ export class GeminiClient {
     const url = `${NEW_PLACES_API_BASE}/places/${placeId}`;
     
     // Build field mask
-    let fieldMask = 'id,name,displayName,formattedAddress,rating,priceLevel,currentOpeningHours,location,types';
+    let fieldMask = 'id,name,displayName,formattedAddress,rating,priceLevel,currentOpeningHours,location,types,phoneNumber,websiteUri,editorialSummary';
     if (includeReviews) {
       fieldMask += ',reviews,photos';
     }

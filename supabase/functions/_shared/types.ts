@@ -102,6 +102,9 @@ export interface PlaceResult {
   photos?: PlacePhoto[];
   maps_uri?: string; // Google Maps URI from Grounding for fallback navigation
   types?: string[]; // Google Places types (e.g., ['restaurant', 'food'], ['locality', 'political'])
+  phone_number?: string; // formatted_phone_number from API
+  website?: string; // website from API
+  editorial_summary?: string; // editorial_summary.overview from API
 }
 
 export interface PlaceReview {

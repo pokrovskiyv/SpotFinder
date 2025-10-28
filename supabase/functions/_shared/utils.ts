@@ -427,14 +427,32 @@ export function hasValidPlaceId(placeId: string | undefined): boolean {
 }
 
 /**
- * Check if two places are duplicates based on place_id or coordinates
+ * Normalize string for comparison (lowercase, remove special chars)
+ */
+function normalizeString(str: string): string {
+  return str.toLowerCase()
+    .replace(/[^a-zа-яё0-9]/g, '')
+    .trim();
+}
+
+/**
+ * Check if two places are duplicates based on place_id, coordinates, or name
  * Places are considered duplicates if:
  * 1. They have the same valid place_id, OR
- * 2. They have coordinates within ~50 meters of each other
+ * 2. They have coordinates within ~11 meters of each other (0.0001°), OR
+ * 3. They have normalized names that match exactly
  */
 export function arePlacesDuplicate(
-  place1: { place_id?: string; geometry?: { location: { lat: number; lng: number } } },
-  place2: { place_id?: string; geometry?: { location: { lat: number; lng: number } } }
+  place1: { 
+    place_id?: string; 
+    name?: string;
+    geometry?: { location: { lat: number; lng: number } } 
+  },
+  place2: { 
+    place_id?: string; 
+    name?: string;
+    geometry?: { location: { lat: number; lng: number } } 
+  }
 ): boolean {
   // Check by place_id first (most reliable)
   if (place1.place_id && place2.place_id && 
@@ -444,14 +462,20 @@ export function arePlacesDuplicate(
     }
   }
   
-  // Check by coordinates (within ~50m)
+  // Check by coordinates (within ~11m, i.e., 0.0001°)
   if (place1.geometry?.location && place2.geometry?.location) {
-    const distance = calculateDistance(
-      { lat: place1.geometry.location.lat, lon: place1.geometry.location.lng },
-      { lat: place2.geometry.location.lat, lon: place2.geometry.location.lng }
-    );
-    // 50 meters threshold - same location
-    if (distance < 50) {
+    const latDiff = Math.abs(place1.geometry.location.lat - place2.geometry.location.lat);
+    const lngDiff = Math.abs(place1.geometry.location.lng - place2.geometry.location.lng);
+    if (latDiff < 0.0001 && lngDiff < 0.0001) {
+      return true;
+    }
+  }
+  
+  // Check by normalized name (fallback for places without place_id or coordinates)
+  if (place1.name && place2.name) {
+    const normalizedName1 = normalizeString(place1.name);
+    const normalizedName2 = normalizeString(place2.name);
+    if (normalizedName1 === normalizedName2 && normalizedName1.length > 0) {
       return true;
     }
   }
@@ -479,13 +503,28 @@ export function deduplicatePlaces<T extends { place_id?: string; geometry?: { lo
 }
 
 /**
- * Check if a place is in the shown places list by place_id or coordinates
+ * Check if a place is in the shown places list by place_id, coordinates, or name
  */
 export function isPlaceShown(
-  place: { place_id?: string; geometry?: { location: { lat: number; lng: number } } },
-  shownPlaces: Array<{ place_id?: string; geometry?: { location: { lat: number; lng: number } } }>
+  place: { 
+    place_id?: string; 
+    name?: string;
+    geometry?: { location: { lat: number; lng: number } } 
+  },
+  shownPlaces: Array<{ 
+    place_id?: string; 
+    name?: string;
+    geometry?: { location: { lat: number; lng: number } } 
+  }>
 ): boolean {
-  return shownPlaces.some(shown => arePlacesDuplicate(place, shown));
+  const isShown = shownPlaces.some(shown => {
+    const isDuplicate = arePlacesDuplicate(place, shown);
+    if (isDuplicate) {
+      console.log(`Found duplicate: "${place.name || 'unnamed'}" is same as "${shown.name || 'unnamed'}"`);
+    }
+    return isDuplicate;
+  });
+  return isShown;
 }
 
 /**

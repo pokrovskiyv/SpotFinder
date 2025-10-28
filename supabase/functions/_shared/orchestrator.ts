@@ -302,12 +302,15 @@ export class Orchestrator {
       ));
 
       // Get full place details for places that need it
+      // Load photos for first place to show in initial results
       const placesWithDetails = await Promise.all(
-        places.map(async (place) => {
-          // NEW Places API already returns complete data, but get details for reviews/photos
+        places.map(async (place, index) => {
+          // NEW Places API already returns complete data, but get details for photos (especially for first place)
           if (place.place_id && !place.place_id.startsWith('maps_')) {
             try {
-              const details = await this.geminiClient.getPlaceDetailsNew(place.place_id, false);
+              // For first place, request photos; for others, just load if not already present
+              const requestPhotos = index === 0 && (!place.photos || place.photos.length === 0);
+              const details = await this.geminiClient.getPlaceDetailsNew(place.place_id, requestPhotos);
               return { ...place, ...details };
             } catch (error) {
               console.error(`Failed to get details for ${place.place_id}:`, error);
@@ -439,12 +442,42 @@ export class Orchestrator {
         ? createMultiPlaceButtons(placesToShow, await this.sessionManager.getValidLocation(userId))
         : createPlaceButtons(sortedPlaces[0], 0);
 
-      await this.telegramClient.sendMessage({
-        chatId,
-        text: messageText,
-        parseMode: 'Markdown',
-        replyMarkup: this.telegramClient.createInlineKeyboard(buttons),
-      });
+      // Try to send photo with caption for first place if available and single place mode
+      const firstPlace = placesToShow[0];
+      const firstPlacePhotos = firstPlace?.photos;
+      if (!showMultiple && firstPlacePhotos && firstPlacePhotos.length > 0) {
+        try {
+          const photoUrl = this.geminiClient.getPhotoUrlNew(
+            firstPlacePhotos[0].photo_reference,
+            800
+          );
+          
+          await this.telegramClient.sendPhoto({
+            chatId,
+            photo: photoUrl,
+            caption: messageText,
+            parseMode: 'Markdown',
+            replyMarkup: this.telegramClient.createInlineKeyboard(buttons),
+          });
+        } catch (photoError) {
+          console.error('Failed to send photo, falling back to text message:', photoError);
+          // Fallback to text message if photo fails
+          await this.telegramClient.sendMessage({
+            chatId,
+            text: messageText,
+            parseMode: 'Markdown',
+            replyMarkup: this.telegramClient.createInlineKeyboard(buttons),
+          });
+        }
+      } else {
+        // No photo available or multiple places mode - send text message
+        await this.telegramClient.sendMessage({
+          chatId,
+          text: messageText,
+          parseMode: 'Markdown',
+          replyMarkup: this.telegramClient.createInlineKeyboard(buttons),
+        });
+      }
 
     } catch (error) {
       console.error('Search error:', error);
