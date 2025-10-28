@@ -1058,12 +1058,12 @@ export class GeminiClient {
   async searchNearbyPlaces(
     location: Location,
     query: string,
-    maxResults: number = 5
+    maxResults: number = 5,
+    radius: number = 5000
   ): Promise<PlaceResult[]> {
     try {
       // Determine place type from query
       const type = this.inferPlaceType(query);
-      const radius = 5000; // 5km radius
       
       const url = `${MAPS_API_BASE}/place/nearbysearch/json?` +
         `location=${location.lat},${location.lon}` +

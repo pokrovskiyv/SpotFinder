@@ -61,6 +61,7 @@ export class SessionManager {
 
   /**
    * Update location in session
+   * Automatically clears history when location updates
    */
   async updateLocation(userId: number, location: Location): Promise<void> {
     const { error } = await this.supabase
@@ -70,6 +71,11 @@ export class SessionManager {
         current_location_lon: location.lon,
         location_timestamp: new Date().toISOString(),
         conversation_state: 'default',
+        // Clear history when location updates
+        shown_place_ids: null,
+        places_cache: null,
+        cache_query: null,
+        cache_index: 0,
         updated_at: new Date().toISOString(),
       })
       .eq('user_id', userId);
@@ -306,6 +312,55 @@ export class SessionManager {
 
     if (error) {
       throw new Error(`Failed to clear places cache: ${error.message}`);
+    }
+  }
+
+  /**
+   * Add shown place IDs to session history
+   */
+  async addShownPlaceIds(userId: number, placeIds: string[]): Promise<void> {
+    const session = await this.getSession(userId);
+    const existingIds = session?.shown_place_ids || [];
+    const uniqueIds = [...new Set([...existingIds, ...placeIds])];
+
+    const { error } = await this.supabase
+      .from('sessions')
+      .update({
+        shown_place_ids: uniqueIds,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    if (error) {
+      throw new Error(`Failed to add shown place IDs: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get list of shown place IDs from session
+   */
+  async getShownPlaceIds(userId: number): Promise<string[]> {
+    const session = await this.getSession(userId);
+    return session?.shown_place_ids || [];
+  }
+
+  /**
+   * Clear shown place IDs (called automatically when location updates)
+   */
+  async clearShownPlaceIds(userId: number): Promise<void> {
+    const { error } = await this.supabase
+      .from('sessions')
+      .update({
+        shown_place_ids: null,
+        places_cache: null,
+        cache_query: null,
+        cache_index: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    if (error) {
+      throw new Error(`Failed to clear shown place IDs: ${error.message}`);
     }
   }
 }

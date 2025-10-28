@@ -74,6 +74,7 @@ export interface DBSession {
   places_cache: PlaceResult[] | null;
   cache_query: string | null;
   cache_index: number;
+  shown_place_ids: string[] | null;
 }
 
 export type ConversationState = 'default' | 'awaiting_location' | 'awaiting_followup';
@@ -163,15 +164,6 @@ export interface DBPlaceCache {
   google_data_jsonb: PlaceResult | null;
   last_fetched_at: string;
   cache_expires_at: string;
-}
-
-export interface DBUserShownPlace {
-  id: string;
-  user_id: number;
-  place_id: string;
-  place_name: string;
-  shown_at: string;
-  search_query: string | null;
 }
 
 export interface SearchFilters {
