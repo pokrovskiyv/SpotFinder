@@ -18,15 +18,29 @@ git status
 
 ### 2. Развертывание на Supabase
 
-```bash
-# Перейдите в корень проекта
-cd C:\Projects\SpotFinder
+**ВАЖНО:** Перед развертыванием установите токен бота:
+```powershell
+$env:TELEGRAM_BOT_TOKEN = "ВАШ_ТОКЕН_БОТА"
+```
 
-# Разверните функцию telegram-webhook
-supabase functions deploy telegram-webhook
-
-# Или, если используете PowerShell скрипт:
+**Вариант 1: Автоматическое развертывание (Рекомендуется)**
+```powershell
+# Разверните функцию И настройте webhook автоматически
 .\Docs\scripts\redeploy-function.ps1
+```
+
+**Вариант 2: Ручное развертывание**
+```powershell
+# Разверните функцию
+npx supabase@latest functions deploy telegram-webhook
+
+# Настройте webhook вручную
+.\Docs\scripts\setup-webhook-auto.ps1
+```
+
+**Вариант 3: Только исправить webhook (без развертывания)**
+```powershell
+.\Docs\scripts\setup-webhook-auto.ps1 -BotToken "ВАШ_ТОКЕН"
 ```
 
 ### 3. Проверка логов

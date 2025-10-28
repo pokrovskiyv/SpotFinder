@@ -65,13 +65,14 @@ coverage/
 .coverage/
 *.lcov 
 
-# Scripts with potential sensitive data
+# Scripts with actual sensitive data (user-specific copies)
+Docs/scripts/*local.ps1
+Docs/scripts/*secret*.ps1
 apply-migration.ps1
 verify-migrations.ps1
 install-webhook-correct.ps1
 fix-bot.ps1
 set-environment-variables.ps1
-redeploy-function.ps1
 check-webhook-status.ps1
 update-commands.ps1
 apply-migration-manual.ps1
