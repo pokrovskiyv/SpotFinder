@@ -291,6 +291,8 @@ export function extractPlaceCount(text: string): number | null {
 
 /**
  * Build Google Maps URL for multi-stop route
+ * NOTE: We build URL manually to avoid URLSearchParams encoding issues with place_id:
+ * place_id:ChIJ... must NOT be encoded (: should stay as :, not %3A)
  */
 export function buildMultiStopRouteUrl(
   userLocation: Location | null,
@@ -306,17 +308,26 @@ export function buildMultiStopRouteUrl(
     throw new Error('Нужно минимум 2 места для маршрута');
   }
   
-  // Строим waypoints через place_id или координаты
-  const waypoints = selectedPlaces.slice(0, -1).map(place => {
-    if (place.place_id?.startsWith('ChIJ')) {
-      return `place_id:${place.place_id}`;
-    } else if (place.geometry?.location) {
-      return `${place.geometry.location.lat},${place.geometry.location.lng}`;
-    }
-    return null;
-  }).filter((w): w is string => w !== null);
+  // Build URL manually to avoid encoding issues with place_id:
+  let url = 'https://www.google.com/maps/dir/?api=1';
   
-  // Последнее место - destination
+  // Add origin if we have user location
+  if (userLocation) {
+    url += `&origin=${userLocation.lat},${userLocation.lon}`;
+  }
+  
+  // Build waypoints (all places except the last one)
+  const waypoints: string[] = [];
+  for (let i = 0; i < selectedPlaces.length - 1; i++) {
+    const place = selectedPlaces[i];
+    if (place.place_id?.startsWith('ChIJ')) {
+      waypoints.push(`place_id:${place.place_id}`);
+    } else if (place.geometry?.location) {
+      waypoints.push(`${place.geometry.location.lat},${place.geometry.location.lng}`);
+    }
+  }
+  
+  // Last place is the destination
   const lastPlace = selectedPlaces[selectedPlaces.length - 1];
   let destination: string;
   
@@ -328,23 +339,16 @@ export function buildMultiStopRouteUrl(
     throw new Error('Невозможно построить маршрут - нет координат');
   }
   
-  // Формируем URL
-  const params = new URLSearchParams({
-    api: '1',
-    destination,
-    travelmode: 'walking', // По умолчанию пешком
-  });
+  url += `&destination=${destination}`;
   
-  // Добавляем origin если есть локация пользователя
-  if (userLocation) {
-    params.set('origin', `${userLocation.lat},${userLocation.lon}`);
-  }
-  
-  // Добавляем waypoints если есть промежуточные точки
+  // Add waypoints if any
   if (waypoints.length > 0) {
-    params.set('waypoints', waypoints.join('|'));
+    url += `&waypoints=${waypoints.join('|')}`;
   }
   
-  return `https://www.google.com/maps/dir/?${params.toString()}`;
+  // Set travel mode
+  url += '&travelmode=walking';
+  
+  return url;
 }
 
