@@ -325,21 +325,44 @@ export function createMultiPlaceButtons(
 ): InlineButton[][] {
   const buttons: InlineButton[][] = [];
   
-  // First row: Reviews button for first place
-  if (places.length > 0 && places[0].place_id) {
-    buttons.push([
-      {
-        text: BUTTONS.REVIEWS,
-        callback_data: `reviews_0_${places[0].place_id}`,
-      },
-      {
-        text: BUTTONS.SHOW_MORE,
-        callback_data: `next_0`,
-      },
-    ]);
+  // Add buttons for each place (max 5 places)
+  // Each place gets a row with "Место N: Отзывы" and "Карта" buttons
+  for (let i = 0; i < Math.min(places.length, 5); i++) {
+    const place = places[i];
+    const placeButtons: InlineButton[] = [];
+    
+    // "Место N: Отзывы" button
+    if (place.place_id) {
+      placeButtons.push({
+        text: `Место ${i + 1}: Отзывы`,
+        callback_data: `reviews_${i}_${place.place_id}`,
+      });
+    }
+    
+    // "Карта" button
+    if (hasValidPlaceId(place.place_id) && place.geometry?.location) {
+      // Hybrid URL format - coordinates + place_id hint
+      const mapUrl = `https://www.google.com/maps/search/?api=1&query=${place.geometry.location.lat},${place.geometry.location.lng}&query_place_id=${place.place_id}`;
+      placeButtons.push({
+        text: `Карта`,
+        url: mapUrl,
+      });
+    } else if (place.geometry?.location) {
+      // Coordinates only fallback
+      const mapUrl = `https://www.google.com/maps/search/?api=1&query=${place.geometry.location.lat},${place.geometry.location.lng}`;
+      placeButtons.push({
+        text: `Карта`,
+        url: mapUrl,
+      });
+    }
+    
+    // Add row if we have buttons for this place
+    if (placeButtons.length > 0) {
+      buttons.push(placeButtons);
+    }
   }
   
-  // Route button if we have 2+ places
+  // Add route button at the end if we have 2+ places
   if (places.length >= 2) {
     try {
       const routeUrl = buildMultiStopRouteUrl(userLocation, places);
