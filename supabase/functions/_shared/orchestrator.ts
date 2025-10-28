@@ -255,24 +255,34 @@ export class Orchestrator {
         `${p.name} - ${p.distance ? p.distance + 'm' : 'unknown distance'}`
       ));
 
-      // Get full place details for all found places
+      // Get full place details for places with valid place_id
       const placesWithDetails = await Promise.all(
         geminiResponse.places.map(async (place) => {
-          if (place.place_id && place.place_id.length > 10) {
+          // Check if place_id looks like a valid Google Place ID (starts with ChIJ or has specific format)
+          const isValidPlaceId = place.place_id && 
+            (place.place_id.startsWith('ChIJ') || place.place_id.match(/^[A-Za-z0-9_-]{20,}$/));
+          
+          if (isValidPlaceId) {
             try {
+              console.log(`Getting details for place_id: ${place.place_id}`);
               const details = await this.geminiClient.getPlaceDetails(place.place_id, false);
-              return { ...place, ...details, distance: place.distance };
+              // Preserve maps_uri from grounding for fallback
+              return { ...place, ...details, maps_uri: place.maps_uri || details.maps_uri };
             } catch (error) {
               console.error(`Failed to get details for ${place.place_id}:`, error);
+              // Return place with basic info from Grounding
               return place;
             }
           }
+          
+          // For places without valid place_id, use what we have from Grounding
+          console.log(`No valid place_id for ${place.name}, using Grounding data`);
           return place;
         })
       );
 
-      // Filter out places without proper place_id
-      const validPlaces = placesWithDetails.filter(p => p.place_id && p.place_id.length > 10);
+      // Keep all places that have at least a name
+      const validPlaces = placesWithDetails.filter(p => p.name && p.name !== 'Без названия');
 
       if (validPlaces.length === 0) {
         await this.telegramClient.sendMessage({

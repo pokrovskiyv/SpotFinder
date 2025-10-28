@@ -96,6 +96,7 @@ export interface PlaceResult {
   };
   reviews?: PlaceReview[];
   photos?: PlacePhoto[];
+  maps_uri?: string; // Google Maps URI from Grounding for fallback navigation
 }
 
 export interface PlaceReview {

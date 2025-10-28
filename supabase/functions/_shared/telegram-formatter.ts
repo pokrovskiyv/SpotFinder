@@ -80,16 +80,23 @@ export function createPlaceButtons(
   buttons.push(row1);
 
   // Second row: Directions button (URL button)
-  if (place.place_id) {
-    // Use place_id for more accurate navigation
+  // Priority: place_id > maps_uri > coordinates
+  if (place.place_id && place.place_id.startsWith('ChIJ')) {
+    // Use place_id for most accurate navigation
     const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=place_id:${place.place_id}`;
     
     buttons.push([{
       text: BUTTONS.DIRECTIONS,
       url: directionsUrl,
     }]);
+  } else if (place.maps_uri) {
+    // Use Maps URI from Grounding as fallback
+    buttons.push([{
+      text: BUTTONS.SHOW_ON_MAP,
+      url: place.maps_uri,
+    }]);
   } else if (place.geometry?.location) {
-    // Fallback: use coordinates
+    // Last fallback: use coordinates
     const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.geometry.location.lat},${place.geometry.location.lng}`;
     
     buttons.push([{

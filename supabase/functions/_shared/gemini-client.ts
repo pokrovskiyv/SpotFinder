@@ -198,22 +198,34 @@ export class GeminiClient {
       if (groundingMetadata.groundingChunks && groundingMetadata.groundingChunks.length > 0) {
         for (const chunk of groundingMetadata.groundingChunks) {
           if (chunk.maps) {
-            // Extract place ID from URI if available
-            // URI format: https://www.google.com/maps/place/?q=place_id:ChIJP3Sa8ziYEmsRUKgyFmh9AQM
+            console.log('Processing grounding chunk:', JSON.stringify(chunk.maps));
+            
+            // Extract place ID from different possible formats
             let placeId = chunk.maps.placeId;
+            
+            // Try to extract from URI
             if (!placeId && chunk.maps.uri) {
-              const placeIdMatch = chunk.maps.uri.match(/place_id:([^&]+)/);
-              placeId = placeIdMatch ? placeIdMatch[1] : chunk.maps.uri;
+              // Format 1: https://www.google.com/maps/place/?q=place_id:ChIJ...
+              const placeIdMatch1 = chunk.maps.uri.match(/place_id[:=]([A-Za-z0-9_-]+)/);
+              // Format 2: https://maps.google.com/?cid=12345
+              const placeIdMatch2 = chunk.maps.uri.match(/cid=([0-9]+)/);
+              // Format 3: Direct place ID in URL
+              const placeIdMatch3 = chunk.maps.uri.match(/ChIJ[A-Za-z0-9_-]+/);
+              
+              placeId = placeIdMatch1?.[1] || placeIdMatch2?.[1] || placeIdMatch3?.[0];
             }
             
-            if (placeId || chunk.maps.title) {
+            // Create place result with Maps URI for fallback
+            if (chunk.maps.title) {
               const place: PlaceResult = {
-                place_id: placeId || chunk.maps.title || 'unknown',
-                name: chunk.maps.title || 'Без названия',
+                place_id: placeId || `maps_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name: chunk.maps.title,
                 address: chunk.maps.address,
-                // Distance and geometry will be calculated when we get full details from Places API
+                // Store Maps URI for navigation fallback
+                maps_uri: chunk.maps.uri,
               };
               
+              console.log(`Extracted place: ${place.name}, place_id: ${place.place_id}, uri: ${place.maps_uri}`);
               places.push(place);
             }
           }
