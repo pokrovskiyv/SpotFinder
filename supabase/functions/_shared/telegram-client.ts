@@ -207,35 +207,67 @@ export class TelegramClient {
 
   /**
    * Send photo group (media group) - up to 10 photos
+   * Returns true if successful, false otherwise
    */
   async sendPhotoGroup(
     chatId: number,
     photos: PlacePhoto[],
-    getPhotoUrl: (photoReference: string, maxWidth?: number) => string
-  ): Promise<void> {
-    if (photos.length === 0) return;
+    getPhotoUrl: (photoReference: string, maxWidth?: number) => string | null
+  ): Promise<boolean> {
+    if (photos.length === 0) return false;
     
     // Limit to 10 photos (Telegram limit for media groups)
     const photosToSend = photos.slice(0, 10);
 
-    const media = photosToSend.map((photo, index) => ({
-      type: 'photo',
-      media: getPhotoUrl(photo.photo_reference, 800),
-    }));
+    // Filter out invalid photos and generate URLs
+    const validMedia = photosToSend
+      .map((photo) => {
+        if (!photo.photo_reference) {
+          console.warn('Photo missing photo_reference, skipping');
+          return null;
+        }
+        
+        const photoUrl = getPhotoUrl(photo.photo_reference, 800);
+        if (!photoUrl) {
+          console.warn(`Failed to generate URL for photo reference: ${photo.photo_reference.substring(0, 50)}`);
+          return null;
+        }
+        
+        return {
+          type: 'photo' as const,
+          media: photoUrl,
+        };
+      })
+      .filter((media): media is { type: 'photo'; media: string } => media !== null);
 
-    const response = await fetch(`${this.apiBase}/sendMediaGroup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        media,
-      }),
-    });
+    if (validMedia.length === 0) {
+      console.warn('No valid photos to send in group');
+      return false;
+    }
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('Failed to send photo group:', error);
-      // Don't throw - photos are optional
+    console.log(`Attempting to send ${validMedia.length} photos in media group`);
+
+    try {
+      const response = await fetch(`${this.apiBase}/sendMediaGroup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          media: validMedia,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Failed to send photo group (status ${response.status}):`, errorText);
+        return false;
+      }
+
+      console.log('Photo group sent successfully');
+      return true;
+    } catch (error) {
+      console.error('Exception while sending photo group:', error);
+      return false;
     }
   }
 
@@ -298,6 +330,7 @@ export class TelegramClient {
 
   /**
    * Send photo with caption
+   * Returns true if successful, false otherwise
    */
   async sendPhoto(options: {
     chatId: number;
@@ -305,8 +338,24 @@ export class TelegramClient {
     caption?: string;
     replyMarkup?: unknown;
     parseMode?: 'Markdown' | 'HTML';
-  }): Promise<void> {
+  }): Promise<boolean> {
     const { chatId, photo, caption, replyMarkup, parseMode } = options;
+
+    // Log photo URL for debugging (truncate if too long)
+    const photoPreview = photo.length > 100 ? `${photo.substring(0, 100)}...` : photo;
+    console.log(`Attempting to send photo to chat ${chatId}: ${photoPreview}`);
+
+    // Validate photo URL if it's a URL (not a file_id)
+    if (photo.startsWith('http://') || photo.startsWith('https://')) {
+      // Check if URL is properly formatted
+      try {
+        const url = new URL(photo);
+        console.log(`Photo URL validated: ${url.protocol}//${url.hostname}${url.pathname}`);
+      } catch (error) {
+        console.error('Invalid photo URL format:', photo);
+        return false;
+      }
+    }
 
     const payload: Record<string, unknown> = {
       chat_id: chatId,
@@ -325,16 +374,26 @@ export class TelegramClient {
       payload.reply_markup = replyMarkup;
     }
 
-    const response = await fetch(`${this.apiBase}/sendPhoto`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    try {
+      const response = await fetch(`${this.apiBase}/sendPhoto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('Failed to send photo:', error);
-      // Don't throw - fallback to text message if photo fails
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Failed to send photo (status ${response.status}):`, errorText);
+        console.error(`Photo URL was: ${photoPreview}`);
+        return false;
+      }
+
+      console.log('Photo sent successfully');
+      return true;
+    } catch (error) {
+      console.error('Exception while sending photo:', error);
+      console.error(`Photo URL was: ${photoPreview}`);
+      return false;
     }
   }
 }

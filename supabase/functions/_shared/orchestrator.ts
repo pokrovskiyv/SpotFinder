@@ -446,22 +446,46 @@ export class Orchestrator {
       const firstPlace = placesToShow[0];
       const firstPlacePhotos = firstPlace?.photos;
       if (!showMultiple && firstPlacePhotos && firstPlacePhotos.length > 0) {
-        try {
-          const photoUrl = this.geminiClient.getPhotoUrlNew(
-            firstPlacePhotos[0].photo_reference,
-            800
-          );
-          
-          await this.telegramClient.sendPhoto({
+        // Try to find a valid photo
+        let validPhotoUrl: string | null = null;
+        
+        for (const photo of firstPlacePhotos) {
+          if (photo.photo_reference) {
+            const photoUrl = this.geminiClient.getPhotoUrlNew(
+              photo.photo_reference,
+              800
+            );
+            
+            if (photoUrl) {
+              validPhotoUrl = photoUrl;
+              break;
+            }
+          }
+        }
+        
+        // Try to send photo if we found a valid URL
+        if (validPhotoUrl) {
+          const photoSent = await this.telegramClient.sendPhoto({
             chatId,
-            photo: photoUrl,
+            photo: validPhotoUrl,
             caption: messageText,
             parseMode: 'Markdown',
             replyMarkup: this.telegramClient.createInlineKeyboard(buttons),
           });
-        } catch (photoError) {
-          console.error('Failed to send photo, falling back to text message:', photoError);
-          // Fallback to text message if photo fails
+          
+          if (!photoSent) {
+            console.warn('Photo send failed, falling back to text message');
+            // Fallback to text message if photo fails
+            await this.telegramClient.sendMessage({
+              chatId,
+              text: messageText,
+              parseMode: 'Markdown',
+              replyMarkup: this.telegramClient.createInlineKeyboard(buttons),
+            });
+          }
+        } else {
+          console.warn('No valid photo URL found for first place, sending text message');
+          // No valid photo URL - send text message
           await this.telegramClient.sendMessage({
             chatId,
             text: messageText,
@@ -676,16 +700,15 @@ export class Orchestrator {
         // Send photos if available
         if (hasPhotos && details.photos) {
           console.log(`Sending ${details.photos.length} photos...`);
-          try {
-            await this.telegramClient.sendPhotoGroup(
-              chatId,
-              details.photos,
-              (ref, maxWidth) => this.geminiClient.getPhotoUrlNew(ref, maxWidth)
-            );
-            console.log('Photos sent successfully');
-          } catch (photoError) {
-            console.error('Failed to send photos:', photoError);
-            // Continue without photos
+          const photosSent = await this.telegramClient.sendPhotoGroup(
+            chatId,
+            details.photos,
+            (ref, maxWidth) => this.geminiClient.getPhotoUrlNew(ref, maxWidth) || null
+          );
+          
+          if (!photosSent) {
+            console.warn('Failed to send photo group, continuing without photos');
+            // Continue without photos - don't block the flow
           }
         }
         

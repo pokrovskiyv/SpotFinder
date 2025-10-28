@@ -341,10 +341,40 @@ export class GeminiClient {
       // КРИТИЧНО: Фильтруем места по расстоянию от пользователя
       // Gemini Grounding может вернуть места из любой точки мира
       const placesWithDistance = await Promise.all(
-        places.map(async (place) => {
+        places.map(async (place, index) => {
           if (place.place_id) {
             try {
-              const details = await this.getPlaceDetails(place.place_id, false);
+              // Загружаем фото только для первых 3 мест (чтобы не делать лишних запросов)
+              // Для остальных загружаем без фото
+              const includePhotos = index < 3;
+              
+              const details = await this.getPlaceDetails(place.place_id, includePhotos);
+              
+              // Валидируем фото перед добавлением
+              if (details.photos && details.photos.length > 0) {
+                details.photos = details.photos.filter(photo => {
+                  // Проверяем, что photo_reference валиден
+                  if (!photo.photo_reference) {
+                    console.warn(`Photo missing photo_reference for place ${place.place_id}`);
+                    return false;
+                  }
+                  // Проверяем, что URL формируется корректно
+                  const photoUrl = this.getPhotoUrlNew(photo.photo_reference, 800);
+                  if (!photoUrl) {
+                    console.warn(`Failed to generate photo URL for reference: ${photo.photo_reference.substring(0, 50)}`);
+                    return false;
+                  }
+                  return true;
+                });
+                
+                if (details.photos.length === 0) {
+                  console.log(`No valid photos found for place ${place.name}, removing photos array`);
+                  delete details.photos;
+                } else {
+                  console.log(`Validated ${details.photos.length} photos for place ${place.name}`);
+                }
+              }
+              
               return details;
             } catch (error) {
               console.error(`Failed to get details for place ${place.place_id}:`, error);
@@ -1595,15 +1625,46 @@ export class GeminiClient {
   /**
    * Get photo URL using NEW Places API
    * Supports both new API format and old format for compatibility
+   * Returns null if photo reference is invalid
    */
-  getPhotoUrlNew(photoNameOrReference: string, maxWidth = 800): string {
+  getPhotoUrlNew(photoNameOrReference: string, maxWidth = 800): string | null {
+    // Validate input
+    if (!photoNameOrReference || typeof photoNameOrReference !== 'string') {
+      console.warn('Invalid photo reference provided:', photoNameOrReference);
+      return null;
+    }
+
+    const trimmed = photoNameOrReference.trim();
+    
+    if (trimmed.length === 0) {
+      console.warn('Empty photo reference provided');
+      return null;
+    }
+
     // If it's a new API photo name (format: places/{place_id}/photos/{photo_id})
-    if (photoNameOrReference.includes('/photos/')) {
-      return `${NEW_PLACES_API_BASE}/${photoNameOrReference}/media?maxWidthPx=${maxWidth}&key=${this.mapsApiKey}`;
+    if (trimmed.includes('/photos/')) {
+      // Validate new API format
+      if (!trimmed.startsWith('places/') || !trimmed.includes('/photos/')) {
+        console.warn('Invalid new API photo format:', trimmed);
+        return null;
+      }
+      
+      const url = `${NEW_PLACES_API_BASE}/${trimmed}/media?maxWidthPx=${maxWidth}&key=${this.mapsApiKey}`;
+      console.log(`Generated new API photo URL: ${url.substring(0, 100)}...`);
+      return url;
+    }
+    
+    // Validate old API format (should be a valid photo_reference)
+    // Photo references are typically long alphanumeric strings
+    if (trimmed.length < 10 || !/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+      console.warn('Invalid old API photo reference format:', trimmed.substring(0, 50));
+      return null;
     }
     
     // Fallback to old API format
-    return this.getPhotoUrl(photoNameOrReference, maxWidth);
+    const url = this.getPhotoUrl(trimmed, maxWidth);
+    console.log(`Generated old API photo URL: ${url.substring(0, 100)}...`);
+    return url;
   }
 
   /**
