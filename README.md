@@ -91,62 +91,71 @@ graph TB
 - ✅ Telegram Bot Token (от [@BotFather](https://t.me/BotFather))
 - ✅ Google API ключи (Gemini + Maps)
 
-### 1. Клонирование репозитория
+## 🚀 Быстрый старт
 
+### Для Production развертывания
+
+1. **Клонирование репозитория**
 ```bash
 git clone https://github.com/your-username/spotfinder.git
 cd spotfinder
 ```
 
-### 2. Настройка переменных окружения
-
-**Windows PowerShell:**
-```powershell
-$env:TELEGRAM_BOT_TOKEN = "your_telegram_token"
-$env:GEMINI_API_KEY = "your_gemini_key"
-$env:GOOGLE_MAPS_API_KEY = "your_google_maps_key"
-$env:SUPABASE_URL = "https://your-project.supabase.co"
-$env:SUPABASE_SERVICE_ROLE_KEY = "your_service_role_key"
+2. **Установка зависимостей**
+```bash
+npm install
 ```
 
-**Linux/macOS:**
+3. **Настройка переменных окружения**
 ```bash
-export TELEGRAM_BOT_TOKEN="your_telegram_token"
-export GEMINI_API_KEY="your_gemini_key"
-export GOOGLE_MAPS_API_KEY="your_google_maps_key"
-export SUPABASE_URL="https://your-project.supabase.co"
-export SUPABASE_SERVICE_ROLE_KEY="your_service_role_key"
+# Скопируйте шаблон
+cp Docs/ENV_EXAMPLE.md .env
+
+# Заполните все значения в .env файле
 ```
 
-### 3. Настройка Supabase
-
-1. Создайте новый проект на [supabase.com](https://supabase.com)
-2. Примените миграции из `supabase/migrations/` в SQL Editor
-3. Установите secrets:
-
+4. **Развертывание**
 ```bash
-supabase secrets set TELEGRAM_BOT_TOKEN="your_token"
-supabase secrets set GEMINI_API_KEY="your_key"
-supabase secrets set GOOGLE_MAPS_API_KEY="your_key"
-supabase secrets set SUPABASE_URL="https://your-project.supabase.co"
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY="your_service_role_key"
+# Развертывание Edge Functions
+npm run deploy
+
+# Настройка webhook
+npm run webhook:setup
 ```
 
-### 4. Развертывание
+### Для локальной разработки
 
+1. **Установка Supabase CLI**
 ```bash
-# Установка Supabase CLI
+# Windows
+winget install Supabase.CLI
+
+# macOS
+brew install supabase/tap/supabase
+
+# Linux
 npm install -g supabase
-
-# Логин в Supabase
-supabase login
-
-# Связывание с проектом
-supabase link --project-ref your-project-id
-
-# Развертывание функций
-supabase functions deploy telegram-webhook
 ```
+
+2. **Запуск локального окружения**
+```bash
+# Запуск локального Supabase
+npm run start
+
+# В отдельном терминале - запуск функций
+npm run dev
+```
+
+3. **Тестирование**
+```bash
+# Запуск тестов
+npm run test
+
+# Проверка webhook
+npm run webhook:check
+```
+
+📖 **Подробные инструкции:** [Локальная разработка](Docs/development/LOCAL_SETUP.md)
 
 ### 5. Настройка webhook
 

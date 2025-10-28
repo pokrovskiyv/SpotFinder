@@ -1,123 +1,82 @@
-# Environment Variables Configuration
+# SpotFinder Environment Variables Template
+# Скопируйте этот файл в .env и заполните значения
 
-## Файл `.env.example`
+# =============================================================================
+# TELEGRAM BOT CONFIGURATION
+# =============================================================================
 
-Создайте файл `.env` в корне проекта со следующим содержимым:
+# Токен бота от @BotFather в Telegram
+# Получить: https://t.me/BotFather -> /newbot
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 
-```env
-# SpotFinder Environment Configuration
-# 
-# ВАЖНО: Никогда не коммитьте файл .env в Git!
+# =============================================================================
+# GOOGLE APIS CONFIGURATION  
+# =============================================================================
 
-# ============================================
-# Supabase Configuration
-# ============================================
+# API ключ для Google Gemini AI
+# Получить: https://makersuite.google.com/app/apikey
+GEMINI_API_KEY=your_gemini_api_key_here
 
-# ID вашего проекта Supabase (например: icnnwmjrprufrohiyfpm)
-SUPABASE_PROJECT_ID=your-project-id
+# API ключ для Google Maps
+# Получить: https://console.cloud.google.com/apis/credentials
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
 
-# URL вашего проекта Supabase
-# Формат: https://YOUR_PROJECT_ID.supabase.co
+# =============================================================================
+# SUPABASE CONFIGURATION
+# =============================================================================
+
+# URL вашего Supabase проекта
+# Формат: https://your-project-id.supabase.co
 SUPABASE_URL=https://your-project-id.supabase.co
 
-# Service Role Key из Supabase Dashboard
-# Найти: Settings → API → service_role key
-# ВАЖНО: Это секретный ключ с полным доступом к БД!
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+# Service Role ключ (НЕ anon key!)
+# Получить: Supabase Dashboard -> Settings -> API -> service_role secret
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
 
-# ============================================
-# Telegram Bot Configuration
-# ============================================
+# ID проекта Supabase (извлекается из URL автоматически)
+# Используется для генерации webhook URL
+SUPABASE_PROJECT_ID=your_project_id_here
 
-# Telegram Bot Token от @BotFather
-# Формат: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz
-TELEGRAM_BOT_TOKEN=your-bot-token
+# =============================================================================
+# ENVIRONMENT CONFIGURATION
+# =============================================================================
 
-# ============================================
-# Google AI Configuration
-# ============================================
-
-# Gemini API Key
-# Получить: https://aistudio.google.com/app/apikey
-GEMINI_API_KEY=your-gemini-api-key
-
-# Google Maps API Key
-# Получить: https://console.cloud.google.com
-# Требуется: Places API (New) enabled
-GOOGLE_MAPS_API_KEY=your-google-maps-api-key
-
-# ============================================
-# Environment Type
-# ============================================
-
-# Тип окружения: development | staging | production
+# Окружение: development, staging, production
+# По умолчанию: production
 ENVIRONMENT=development
-```
 
-## Настройка окружений
+# =============================================================================
+# LOCAL DEVELOPMENT SETUP
+# =============================================================================
 
-### Development (Локальная разработка)
+# Для локальной разработки используйте эти значения:
+# SUPABASE_URL=http://localhost:54321
+# ENVIRONMENT=development
+# SUPABASE_PROJECT_ID=local
 
-```env
-ENVIRONMENT=development
-SUPABASE_PROJECT_ID=your-local-project-id
-SUPABASE_URL=http://localhost:54321
-TELEGRAM_BOT_TOKEN=your-test-bot-token
-# ... остальные ключи
-```
+# =============================================================================
+# SECURITY NOTES
+# =============================================================================
 
-### Staging (Тестирование)
+# ⚠️  ВАЖНО: Никогда не коммитьте .env файл в Git!
+# ⚠️  Используйте .env.example как шаблон
+# ⚠️  Для production используйте GitHub Secrets или переменные окружения сервера
 
-```env
-ENVIRONMENT=staging
-SUPABASE_PROJECT_ID=your-staging-project-id
-SUPABASE_URL=https://staging-project.supabase.co
-TELEGRAM_BOT_TOKEN=your-staging-bot-token
-# ... остальные ключи
-```
+# =============================================================================
+# QUICK SETUP COMMANDS
+# =============================================================================
 
-### Production (Продакшен)
+# 1. Скопируйте этот файл:
+#    cp .env.example .env
 
-```env
-ENVIRONMENT=production
-SUPABASE_PROJECT_ID=icnnwmjrprufrohiyfpm
-SUPABASE_URL=https://your-project.supabase.co
-TELEGRAM_BOT_TOKEN=your-production-bot-token
-# ... остальные ключи
-```
+# 2. Заполните все значения выше
 
-## Важные примечания
+# 3. Для локальной разработки:
+#    supabase start
+#    npm run dev
 
-### 🔒 Безопасность
+# 4. Для настройки webhook:
+#    npm run webhook:setup
 
-1. **Никогда не коммитьте .env файлы** - они уже в .gitignore
-2. **Используйте разные ключи** для каждого окружения
-3. **Регулярно ротируйте** Service Role Key
-4. **Ограничьте доступ** к API ключам (IP whitelist где возможно)
-
-### ⚠️ Webhook URL формат
-
-Webhook URL генерируется автоматически в формате:
-```
-https://YOUR_PROJECT_ID.functions.supabase.co/telegram-webhook
-```
-
-**ВАЖНО:** Используйте `.functions.supabase.co` а НЕ `.supabase.co/functions/v1/`
-
-Второй формат требует JWT авторизацию и вызовет 401 ошибки!
-
-### 📝 Как получить ключи
-
-**Supabase:**
-- Dashboard → Settings → API → service_role key
-
-**Telegram Bot:**
-- Напишите @BotFather → /newbot
-
-**Gemini API:**
-- https://aistudio.google.com/app/apikey
-
-**Google Maps API:**
-- https://console.cloud.google.com → APIs & Services
-- Включите: Places API (New)
-
+# 5. Для тестирования:
+#    npm run test

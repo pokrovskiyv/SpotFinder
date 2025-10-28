@@ -1,5 +1,27 @@
 {
+  "name": "spotfinder",
+  "version": "1.0.0",
+  "description": "Telegram bot for finding places using AI and Google Maps",
+  "scripts": {
+    "dev": "supabase start && supabase functions serve",
+    "test": "deno test --allow-all supabase/functions/_shared/*_test.ts",
+    "test:watch": "deno test --allow-all --watch supabase/functions/_shared/*_test.ts",
+    "deploy": "supabase functions deploy telegram-webhook",
+    "webhook:setup": "deno run --allow-env --allow-net scripts/setup-webhook.ts",
+    "webhook:check": "curl \"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo\"",
+    "lint": "deno lint supabase/functions/",
+    "fmt": "deno fmt supabase/functions/",
+    "fmt:check": "deno fmt --check supabase/functions/",
+    "type-check": "deno check supabase/functions/_shared/*.ts",
+    "start": "supabase start",
+    "stop": "supabase stop",
+    "reset": "supabase db reset",
+    "status": "supabase status"
+  },
   "devDependencies": {
     "supabase": "^2.53.6"
-  }
+  },
+  "keywords": ["telegram", "bot", "supabase", "ai", "maps"],
+  "author": "SpotFinder Team",
+  "license": "MIT"
 }
