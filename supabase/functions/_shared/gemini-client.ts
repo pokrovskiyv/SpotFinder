@@ -1461,10 +1461,15 @@ export class GeminiClient {
   ): Promise<PlaceResult[]> {
     const url = `${NEW_PLACES_API_BASE}/places:searchText`;
     
-    const payload = {
+    const payload: any = {
       textQuery: query,
       maxResultCount: 20,
-      locationRestriction: {
+      languageCode: 'ru',
+    };
+
+    // Use locationBias instead of locationRestriction for Text Search
+    if (radius > 0) {
+      payload.locationBias = {
         circle: {
           center: {
             latitude: location.lat,
@@ -1472,9 +1477,8 @@ export class GeminiClient {
           },
           radius: radius,
         },
-      },
-      languageCode: 'ru',
-    };
+      };
+    }
 
     // Log payload for debugging
     console.log('searchTextNew payload:', JSON.stringify(payload, null, 2));
