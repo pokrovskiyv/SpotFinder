@@ -21,7 +21,6 @@ import { TelegramUpdate, PlaceResult, Location, QuotaExceededError } from './typ
 import { MESSAGES, DONATE_AMOUNTS } from './constants.ts';
 import { isFollowUpQuestion, extractOrdinal, extractCityFromQuery, isRouteRequest, extractPlaceIndices, buildMultiStopRouteUrl, isMultiPlaceRequest, extractPlaceCount } from './utils.ts';
 import { ContextHandler } from './context-handler.ts';
-import { intentMapper, MappedIntent } from './intent-mapper.ts';
 
 export class Orchestrator {
   private sessionManager: SessionManager;
@@ -298,17 +297,8 @@ export class Orchestrator {
     location: Location
   ): Promise<void> {
     try {
-      // Preprocess query through intent mapper
-      const mappedIntent = intentMapper.mapQuery(query);
-      const processedQuery = mappedIntent ? mappedIntent.suggestedQuery : query;
-      
-      if (mappedIntent) {
-        console.log(`✓ Intent mapped: "${query}" → "${processedQuery}"`);
-        console.log(`  Intent: ${mappedIntent.intent}, Category: ${mappedIntent.category}`);
-        if (mappedIntent.excludeTypes && mappedIntent.excludeTypes.length > 0) {
-          console.log(`  Exclude types: ${mappedIntent.excludeTypes.join(', ')}`);
-        }
-      }
+      // No preprocessing - let Gemini AI handle intent recognition through improved prompts
+      console.log(`🔍 Processing query: "${query}"`);
 
       // Get user preferences for context
       const preferences = await this.userManager.getUserPreferences(userId);
@@ -317,17 +307,16 @@ export class Orchestrator {
       const wantsMultiplePlaces = isMultiPlaceRequest(query);
       const requestedCount = extractPlaceCount(query);
 
-      // Get Gemini's response with Maps Grounding - this will search places and provide answer
-      // Use processed query if intent was mapped, otherwise use original query
+      // Get Gemini's response with Maps Grounding
+      // Gemini will understand intent through improved system prompts
       let geminiResponse;
       try {
         geminiResponse = await this.geminiClient.search({
-          query: processedQuery,
+          query,
           location,
           userId,
           context: preferences ? { user_preferences: preferences } : undefined,
           isRouteRequest: wantsMultiplePlaces, // Hint to Gemini to find multiple places
-          mappedIntent: mappedIntent || undefined, // Pass mapped intent for additional context (convert null to undefined)
         });
       } catch (error) {
         if (error instanceof QuotaExceededError) {

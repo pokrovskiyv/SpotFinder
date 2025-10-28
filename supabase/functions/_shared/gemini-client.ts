@@ -96,7 +96,7 @@ export class GeminiClient {
    */
   private buildPrompt(request: GeminiRequest): string {
     const timeContext = getTimeContext();
-    const { query, context, mappedIntent } = request;
+    const { query, context } = request;
 
     // Determine urgency level
     const urgency = this.detectUrgency(query);
@@ -108,6 +108,7 @@ export class GeminiClient {
     const isRouteRequest = !!(request as any).isRouteRequest || false;
 
     // Build contextual prompt using improved prompt system
+    // Gemini will handle intent recognition through improved prompts
     let systemPrompt = buildContextualPrompt(
       query,
       timeContext,
@@ -115,21 +116,6 @@ export class GeminiClient {
       hasContext,
       isRouteRequest
     );
-
-    // Add mapped intent context if available (from intent-mapper preprocessing)
-    if (mappedIntent && mappedIntent.matched) {
-      systemPrompt += `\n\n🎯 РАСПОЗНАННОЕ НАМЕРЕНИЕ (ПРИОРИТЕТ!):`;
-      systemPrompt += `\n- Оригинальный запрос: "${mappedIntent.originalQuery}"`;
-      systemPrompt += `\n- Распознанное намерение: ${mappedIntent.intent}`;
-      systemPrompt += `\n- Категория поиска: ${mappedIntent.category}`;
-      systemPrompt += `\n- Улучшенный запрос: "${mappedIntent.suggestedQuery}"`;
-      
-      if (mappedIntent.excludeTypes && mappedIntent.excludeTypes.length > 0) {
-        systemPrompt += `\n\n⚠️ КРИТИЧЕСКИ ВАЖНО - НЕ ПРЕДЛАГАЙ ЭТИ ТИПЫ МЕСТ:`;
-        systemPrompt += `\n${mappedIntent.excludeTypes.map(type => `❌ ${type}`).join('\n')}`;
-        systemPrompt += `\n\nЭто намерение уже обработано и распознано. Следуй улучшенному запросу!`;
-      }
-    }
 
     // Add previous conversation context if available
     if (hasContext) {

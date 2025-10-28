@@ -209,15 +209,6 @@ export interface GeminiRequest {
     user_preferences?: Partial<DBUserPreferences>;
   };
   isRouteRequest?: boolean; // Flag for route planning requests
-  mappedIntent?: {
-    originalQuery: string;
-    suggestedQuery: string;
-    intent: string;
-    category: string;
-    excludeTypes?: string[];
-    matched: boolean;
-    matchedPattern?: string;
-  }; // Preprocessed intent from intent-mapper
 }
 
 export interface GeminiResponse {
